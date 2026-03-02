@@ -1,0 +1,15 @@
+# Reports
+reports/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Cache
+.scan_cache/
+.can_cache/
+
+# Virtual env
+.venv/
