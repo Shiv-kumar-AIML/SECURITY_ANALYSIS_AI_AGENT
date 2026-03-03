@@ -2,6 +2,8 @@
   <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Engine-LLM_Reasoning-purple?style=for-the-badge&logo=openai&logoColor=white" />
+  <img src="https://img.shields.io/badge/License-Apache_2.0-red?style=for-the-badge&logoColor=white" />
+  <img src="https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge&logoColor=white" />
   
   <h1>🛡️ Pentas-Agent</h1>
   <p><strong>Enterprise-Grade, Multi-Agent AI Security Vulnerability Detection Engine</strong></p>
@@ -17,21 +19,31 @@
 
 ## 📸 See it in Action
 
-Here is what it looks like when Pentas-Agent runs a deep analysis on a codebase:
+Pentas-Agent provides a rich, color-coded CLI interface that guides you through every step of the deep security analysis.
 
+<details open>
+<summary><b>🔍 Phase 1: Scan Configuration & Reconnaissance</b></summary>
+<br>
 <div align="center">
   <img src="./assets/scan_configuration.png" alt="Scan Configuration and Tool Status" width="800" />
 </div>
+</details>
+
+<details open>
+<summary><b>🧠 Phase 2: Deep Vulnerability Analysis</b></summary>
 <br>
 <div align="center">
   <img src="./assets/detailed_scan.png" alt="Deep Vulnerability Analysis Phase" width="800" />
 </div>
+</details>
+
+<details open>
+<summary><b>📊 Final Summary & Report Generation</b></summary>
 <br>
 <div align="center">
   <img src="./assets/final_report.png" alt="Generated HTML/Markdown Security Report" width="800" />
 </div>
-
-> **Note to developer**: Please save your uploaded screenshots into an `assets/` folder in the root directory (e.g., `assets/scan_configuration.png`, `assets/detailed_scan.png`, `assets/final_report.png`) for them to display here.
+</details>
 
 ---
 
@@ -40,7 +52,7 @@ Here is what it looks like when Pentas-Agent runs a deep analysis on a codebase:
 Traditional scanners (like standard Semgrep or Checkmarx) produce thousands of false positives because they rely on static grep-like patterns. **Pentas-Agent is different.**
 
 - 🧠 **Methodology-Based Skills**: Instead of looking for `eval(...)`, the agent traces the dataflow: *Did this input come from an HTTP request? Was it sanitized by Zod? Did it reach the eval sink?*
-- � **Multi-Agent Architecture**: Dedicated AI agents for Reconnaissance, Deep Analysis, Verification (False Positive Reduction), and Remediation.
+- 🎭 **Multi-Agent Architecture**: Dedicated AI agents for Reconnaissance, Deep Analysis, Verification (False Positive Reduction), and Remediation.
 - 🛡️ **Framework-Aware**: Automatically recognizes safety mechanisms in Drizzle ORM, Django ORM, Express auto-escaping, Fastify schemas, etc.
 - 🧹 **Aggressive False Positive Filtering**: Dramatically reduces alert fatigue by eliminating test files, trusted constants, and dead code endpoints.
 
@@ -48,47 +60,58 @@ Traditional scanners (like standard Semgrep or Checkmarx) produce thousands of f
 
 ## 🏗️ How It Works (The Multi-Agent Flow)
 
-Pentas-Agent operates in a highly orchestrated 6-phase pipeline. Here is the exact graph flow of how a repository goes from raw code to a verified security report:
+Pentas-Agent operates in a highly orchestrated 6-phase pipeline. Here is the architecture flow from raw code to verified security report:
 
 ```mermaid
 graph TD
-    classDef agent fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff;
-    classDef tool fill:#047857,stroke:#10b981,stroke-width:2px,color:#fff;
-    classDef phase fill:#374151,stroke:#6b7280,stroke-width:2px,color:#fff;
-    classDef report fill:#9d174d,stroke:#f43f5e,stroke-width:2px,color:#fff;
+    classDef agent fill:#1e3a8a,stroke:#3b82f6,stroke-width:2px,color:#fff,rx:5px,ry:5px;
+    classDef tool fill:#047857,stroke:#10b981,stroke-width:2px,color:#fff,rx:5px,ry:5px;
+    classDef phase fill:#374151,stroke:#6b7280,stroke-width:2px,color:#fff,font-weight:bold,rx:5px,ry:5px;
+    classDef report fill:#9d174d,stroke:#f43f5e,stroke-width:2px,color:#fff,rx:5px,ry:5px;
+    classDef subg fill:none,stroke:#4b5563,stroke-width:2px,stroke-dasharray: 5 5;
 
-    A[Raw Source Code] --> B{Phase 1: Recon & Tool Execution}:::phase
+    A([Raw Source Code]) --> B{Phase 1: Recon & Tools}:::phase
     
-    subgraph Phase 1
-        B --> C[Recon Agent: AST Parsing & Threat Model]:::agent
+    subgraph P1[Data Collection]
+        direction TB
+        B --> C[Recon Agent: AST & Threat Model]:::agent
         B --> D[Traditional Tools: Semgrep, Trivy, npm audit]:::tool
     end
+    class P1 subg
 
-    C & D --> E{Phase 2: Deep Vulnerability Analysis}:::phase
+    C & D --> E{Phase 2: Deep Analysis}:::phase
     
-    subgraph Phase 2
+    subgraph P2[Vulnerability Reasoning]
+        direction TB
         E --> F[Vulnerability Agent]:::agent
         F --> G[(12+ Methodology Skills)]:::tool
-        G -.->|SQLi Tracing| F
-        G -.->|Auth Logic Check| F
         G -.->|Dataflow Taint| F
+        G -.->|Auth Logic Check| F
+        G -.->|SQLi Tracing| F
     end
+    class P2 subg
 
-    F --> H{Phase 3: Remediation Generation}:::phase
+    F --> H{Phase 3: Remediation}:::phase
     H --> I[Remediation Agent: Context-Aware Fixes]:::agent
 
-    I --> J{Phase 4: Verification & Filtering}:::phase
+    I --> J{Phase 4: Verification}:::phase
 
-    subgraph Phase 4
+    subgraph P4[False Positive Filtering]
+        direction TB
         J --> K[Verifier Agent]:::agent
         K --> L[Rule-Based Filters]
-        K --> M[LLM False Positive Reduction Engine]
+        K --> M[LLM FP Reduction Engine]
     end
+    class P4 subg
 
-    K --> N{Phase 5: Report Generation}:::phase
-    N --> O[Markdown Report]:::report
-    N --> P[JSON / CI-CD Format]:::report
-    N --> Q[SARIF Format]:::report
+    K --> N{Phase 5: Reporting}:::phase
+    
+    subgraph P5[Outputs]
+        N --> O[Markdown (.md)]:::report
+        N --> P[JSON Format]:::report
+        N --> Q[SARIF Format]:::report
+    end
+    class P5 subg
 ```
 
 ---
@@ -132,32 +155,51 @@ To start a full multi-agent scan, run the CLI. You can target local directories 
 python main.py /path/to/local/project --openai-key sk-xxxx --model gpt-4.1-mini
 ```
 
-**Scan a GitHub Repository:**
+**Scan a GitHub Repository (with authentication for private repos):**
 ```bash
-python main.py https://github.com/mindrootstech/inked-web.git \
+python main.py https://ghp_YourAccessTokenHere@github.com/organization/private-repo.git \
   --openai-key sk-xxxx \
   --model gpt-4.1-nano
 ```
 
-**Scan a Private Repository (using Personal Access Token):**
-```bash
-python main.py https://ghp_YourTokenHere@github.com/org/private-repo.git \
-  --openai-key sk-xxxx \
-  --model gpt-4.1-mini
-```
+---
+
+## 🤝 Contributing to Pentas-Agent
+
+We welcome contributions from the community! Whether you want to add new methodologies, integrate new static analysis tools, or improve the LLM reasoning, your help is appreciated.
+
+### 🛠️ Development Environment Setup
+
+1. **Fork & Clone**: Fork the repo and clone it locally.
+2. **Virtual Environment**: Create a virtual environment `python -m venv venv && source venv/bin/activate`.
+3. **Install Requirements**: `pip install -r requirements.txt`.
+4. **Tool Installations**: Ensure `semgrep`, `trivy`, `npm`, and `bandit` are accessible in your environment path.
+
+### 🧠 Creating New AI Skills
+Pentas-Agent separates security logic from core code. You don't need to write Python to add a new security check!
+
+1. Open the `skills/` directory.
+2. Create a new markdown file mimicking `sast-path-traversal-engine.md`.
+3. Focus on **Methodology**: Explain step-by-step *how* a human auditor would trace the vulnerability, rather than providing exact regex patterns to match.
+4. Add your new skill file name to the `core/constants.py` layer execution arrays.
+
+### 🔄 Pull Request Process
+1. Create a feature branch (`git checkout -b feature/amazing-skill`).
+2. Test your changes locally on target repositories.
+3. Keep code modular; if editing core agents, ensure you don't break the existing multi-agent flow.
+4. Open a PR with a clear description of the vulnerability your new skill/feature addresses.
 
 ---
 
-## � Output Reports
+## 📄 Output Reports
 
-After the scan sequence is complete, the results are stored in the `reports/` folder:
-
-1. **`security_report_YYYYMMDD-HHMMSS.md`**: A beautifully formatted, human-readable markdown file with vulnerability details, snippets, and step-by-step remediation code.
-2. **`security_report_YYYYMMDD-HHMMSS.json`**: A structured format ready to be ingested by custom dashboards or CI/CD pipelines.
-3. **`security_report_YYYYMMDD-HHMMSS.sarif.json`**: The industry standard format for integrating directly into GitHub Advanced Security (GHAS) or GitLab CI.
+After the scan sequence is complete, the results are natively stored in the `reports/` folder:
+- **Markdown (`.md`)**: Beautiful formatting for human review.
+- **JSON (`.json`)**: Raw structured data.
+- **SARIF (`.sarif.json`)**: Industry standard file format for integrations (like GitHub Advanced Security).
 
 ---
 
 <div align="center">
-  <p>Built for precision, designed for production. 🛡️</p>
+  <p>Built for precision. Designed for production. 🛡️</p>
 </div>
