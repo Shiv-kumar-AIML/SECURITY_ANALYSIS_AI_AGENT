@@ -1,15 +1,29 @@
-# Reports
-reports/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
 
-# Secrets
-.env
-.env.*
-*.key
-*.pem
-
-# Cache
-.scan_cache/
-.can_cache/
-
-# Virtual env
+# Virtual environments
+venv/
 .venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project
+reports/
+cloned_repos/
+.env
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

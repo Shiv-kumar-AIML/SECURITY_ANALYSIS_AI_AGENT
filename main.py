@@ -1,67 +1,351 @@
+"""
+Security Analysis Agent — Production Multi-Agent Security Scanner
+Entry point with Rich CLI interface.
+"""
 import argparse
 import sys
 import os
+import subprocess
+import time
+from urllib.parse import urlparse
 from pathlib import Path
+
 from core.parser import CodeParser
 from core.orchestrator import SASTOrchestrator
 from core.report_generator import ReportGenerator
-from core.constants import SKILLS_DIR, DEFAULT_MODEL, BASE_DIR
-from core.git_utils import clone_repo, is_git_url
+from core.constants import SKILLS_DIR, DEFAULT_MODEL, BASE_DIR, CLONED_REPOS_DIR
+from core.tools.tool_registry import ToolRegistry
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+    from rich import box
+    HAS_RICH = True
+except ImportError:
+    HAS_RICH = False
+
+
+BANNER = """
+[bold bright_cyan]
+  ╔═══════════════════════════════════════════════════════════════╗
+  ║          🛡️  SECURITY ANALYSIS AGENT  v2.0                   ║
+  ║       Multi-Agent Reasoning-Based Vulnerability Scanner      ║
+  ╚═══════════════════════════════════════════════════════════════╝
+[/bold bright_cyan]"""
+
+BANNER_PLAIN = """
+  ╔═══════════════════════════════════════════════════════════════╗
+  ║          🛡️  SECURITY ANALYSIS AGENT  v2.0                   ║
+  ║       Multi-Agent Reasoning-Based Vulnerability Scanner      ║
+  ╚═══════════════════════════════════════════════════════════════╝
+"""
+
+
+def get_console():
+    if HAS_RICH:
+        return Console()
+    return None
+
 
 def check_setup():
     if not SKILLS_DIR.exists():
         SKILLS_DIR.mkdir(parents=True)
-        print(f"[*] Created skills directory at {SKILLS_DIR}")
+
+
+def clone_repo(repo_url: str, console=None) -> str:
+    parsed = urlparse(repo_url)
+    repo_name = os.path.basename(parsed.path).replace(".git", "")
+    if not repo_name:
+        repo_name = "cloned_repo"
+
+    clone_dir = CLONED_REPOS_DIR / repo_name
+
+    if clone_dir.exists():
+        msg = f"Repository already exists at {clone_dir}. Using existing code..."
+        if console:
+            console.print(f"  [yellow]⚠[/yellow] {msg}")
+        else:
+            print(f"[*] {msg}")
+        return str(clone_dir)
+
+    msg = f"Cloning repository from {repo_url}..."
+    if console:
+        console.print(f"  [cyan]▸[/cyan] {msg}")
+    else:
+        print(f"[*] {msg}")
+
+    try:
+        clone_dir.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", repo_url, str(clone_dir)],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError as e:
+        msg = f"Failed to clone repository: {e}"
+        if console:
+            console.print(f"  [red]✗[/red] {msg}")
+        else:
+            print(f"[-] {msg}")
+        sys.exit(1)
+
+    return str(clone_dir)
+
+
+def print_tool_status(console):
+    """Print the status of all external scanning tools."""
+    registry = ToolRegistry()
+    status = registry.get_status_report()
+
+    table = Table(
+        title="🔧 Tool Status",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Tool", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Description")
+
+    descriptions = {
+        "semgrep": "Pattern-based SAST scanner",
+        "bandit": "Python-specific security linter",
+        "trivy": "SCA, container & IaC scanner",
+        "gitleaks": "Secret & credential detector",
+        "npm_audit": "Node.js dependency auditor",
+    }
+
+    for tool_name, available in status.items():
+        status_icon = "[green]✓ Installed[/green]" if available else "[dim]✗ Not Found[/dim]"
+        desc = descriptions.get(tool_name, "")
+        table.add_row(tool_name, status_icon, desc)
+
+    console.print(table)
+    console.print()
+
+
+def print_scan_config(console, target_path, engine, model, tools_only=False):
+    """Print scan configuration panel."""
+    config_text = Text()
+    config_text.append("  Target:  ", style="dim")
+    config_text.append(f"{Path(target_path).resolve()}\n", style="bold")
+    config_text.append("  Engine:  ", style="dim")
+    config_text.append(f"{engine}\n", style="bold cyan")
+    config_text.append("  Model:   ", style="dim")
+    config_text.append(f"{model}\n", style="bold green")
+    config_text.append("  Mode:    ", style="dim")
+    config_text.append("Tools Only" if tools_only else "Multi-Agent (Full)", style="bold yellow")
+
+    console.print(Panel(config_text, title="[bold]Scan Configuration[/bold]", border_style="bright_blue"))
+    console.print()
+
+
+def print_results_summary(console, scan_result):
+    """Print a beautiful results summary."""
+    from core.findings import Severity
+
+    confirmed = scan_result.get_confirmed()
+    false_positives = [f for f in scan_result.findings if f.is_false_positive]
+    scan_duration = scan_result.scan_end - scan_result.scan_start if scan_result.scan_end else 0
+
+    # Severity summary table
+    table = Table(
+        title="📊 Findings Summary",
+        box=box.HEAVY_EDGE,
+        show_header=True,
+        header_style="bold white",
+    )
+    table.add_column("Severity", style="bold", justify="center")
+    table.add_column("Count", justify="center")
+    table.add_column("", min_width=20)
+
+    counts = scan_result.severity_counts
+    for sev in Severity:
+        count = counts.get(sev.value, 0)
+        bar = "█" * min(count * 2, 30) or "—"
+        table.add_row(
+            f"{sev.emoji} {sev.value}",
+            str(count),
+            f"[{sev.color}]{bar}[/{sev.color}]",
+        )
+
+    console.print(table)
+    console.print()
+
+    # Stats panel
+    stats = Text()
+    stats.append("  Total Confirmed:  ", style="dim")
+    stats.append(f"{len(confirmed)}\n", style="bold bright_red" if len(confirmed) > 0 else "bold green")
+    stats.append("  False Positives:  ", style="dim")
+    stats.append(f"{len(false_positives)}\n", style="bold")
+    stats.append("  Files Scanned:    ", style="dim")
+    stats.append(f"{scan_result.files_scanned}\n", style="bold")
+    stats.append("  Lines of Code:    ", style="dim")
+    stats.append(f"{scan_result.total_lines}\n", style="bold")
+    stats.append("  Scan Duration:    ", style="dim")
+    stats.append(f"{scan_duration:.1f}s\n", style="bold")
+    stats.append("  Risk Score:       ", style="dim")
+    risk = scan_result.risk_score
+    risk_color = "green" if risk < 3 else "yellow" if risk < 7 else "bright_red"
+    stats.append(f"{risk:.1f}/10", style=f"bold {risk_color}")
+
+    console.print(Panel(stats, title="[bold]Scan Statistics[/bold]", border_style="bright_green"))
+    console.print()
+
+    # Top findings preview
+    if confirmed:
+        console.print("[bold]🔍 Top Findings Preview:[/bold]\n")
+        for i, f in enumerate(sorted(confirmed, key=lambda x: x.severity.score, reverse=True)[:5], 1):
+            console.print(f"  {f.severity.emoji} [bold]{f.title}[/bold]")
+            console.print(f"     [dim]{f.file_path}:{f.line_number} | {f.cwe_id} | Confidence: {f.confidence:.0%}[/dim]")
+        console.print()
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Multi-Agent Enterprise SAST & SCA Scanner")
-    parser.add_argument("target", help="Directory of the codebase OR a Git repository URL to scan")
-    parser.add_argument("--model", help=f"Ollama/Gemini/OpenAI model to use (default: {DEFAULT_MODEL})", default=DEFAULT_MODEL)
-    parser.add_argument("--gemini-key", help="Google Gemini API Key (switches engine from local Ollama to cloud Gemini)", default=None)
-    parser.add_argument("--openai-key", help="OpenAI API Key (switches engine from local Ollama to cloud OpenAI)", default=None)
+    parser = argparse.ArgumentParser(
+        description="🛡️ Security Analysis Agent — Multi-Agent Reasoning-Based Vulnerability Scanner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("target",
+                        help="Directory of the codebase OR a Git repository URL to scan")
+    parser.add_argument("--model",
+                        help=f"LLM model to use (default: {DEFAULT_MODEL})",
+                        default=DEFAULT_MODEL)
+    parser.add_argument("--gemini-key",
+                        help="Google Gemini API Key",
+                        default=os.getenv("GEMINI_API_KEY"))
+    parser.add_argument("--openai-key",
+                        help="OpenAI API Key (or compatible)",
+                        default=os.getenv("OPENAI_API_KEY"))
+    parser.add_argument("--openai-base-url",
+                        help="OpenAI-compatible base URL",
+                        default=os.getenv("OPENAI_BASE_URL"))
+    parser.add_argument("--tools-only",
+                        action="store_true",
+                        help="Run only external tools (no LLM analysis)")
+    parser.add_argument("--output-format",
+                        choices=["markdown", "json", "sarif", "all"],
+                        default="all",
+                        help="Report output format (default: all)")
     args = parser.parse_args()
 
+    console = get_console()
     check_setup()
 
-    target_path = args.target
-    if is_git_url(target_path):
-        target_path = clone_repo(target_path)
-
-    print(f"\n[+] Initializing SAST scan on: {Path(target_path).resolve()}")
-    if args.openai_key:
-        print(f"[+] Using Engine: OpenAI API")
-    elif args.gemini_key:
-        print(f"[+] Using Engine: Google Gemini API")
+    # Banner
+    if console:
+        console.print(BANNER)
     else:
-        print(f"[+] Using Engine: Local Ollama")
-        
-    print(f"[+] Using LLM Model: {args.model}")
-    
-    # 1. Parse Code
-    print("\n[*] Parsing target codebase...")
+        print(BANNER_PLAIN)
+
+    # Handle Git URL
+    target_path = args.target
+    if target_path.startswith(("http://", "https://", "git@")):
+        target_path = clone_repo(target_path, console)
+
+    # Determine engine
+    if args.openai_key:
+        engine_name = "OpenAI API"
+    elif args.gemini_key:
+        engine_name = "Google Gemini"
+    else:
+        engine_name = "Local Ollama"
+
+    # Print config
+    if console:
+        print_scan_config(console, target_path, engine_name, args.model, args.tools_only)
+        print_tool_status(console)
+    else:
+        print(f"[+] Target: {Path(target_path).resolve()}")
+        print(f"[+] Engine: {engine_name}")
+        print(f"[+] Model: {args.model}")
+
+    # Parse code
+    if console:
+        console.rule("[bold]Parsing Target Codebase[/bold]")
+    else:
+        print("\n[*] Parsing target codebase...")
+
     code_parser = CodeParser(target_path)
     target_code = code_parser.extract_context()
-    
-    if not target_code:
-        print("[-] No supported source files found. Exiting.")
+
+    if not target_code and not args.tools_only:
+        msg = "No supported source files found. Exiting."
+        if console:
+            console.print(f"  [red]✗[/red] {msg}")
+        else:
+            print(f"[-] {msg}")
         sys.exit(1)
-        
-    print(f"[+] Extracted codebase context: {len(target_code)} characters.")
-    
-    # 2. Orchestrate Scan
+
+    if console:
+        console.print(f"  [green]✓[/green] Extracted [bold]{len(target_code)}[/bold] characters of code context\n")
+    else:
+        print(f"[+] Extracted codebase context: {len(target_code)} characters.")
+
+    # Run Scan
     try:
-        orchestrator = SASTOrchestrator(target_code, model_name=args.model, gemini_key=args.gemini_key, openai_key=args.openai_key)
-        results = orchestrator.analyze()
+        orchestrator = SASTOrchestrator(
+            target_code=target_code,
+            target_path=target_path,
+            model_name=args.model,
+            gemini_key=args.gemini_key,
+            openai_key=args.openai_key,
+            openai_base_url=args.openai_base_url,
+        )
+
+        if args.tools_only:
+            scan_result = orchestrator.analyze_tools_only(console=console)
+        else:
+            scan_result = orchestrator.analyze(console=console)
+
     except KeyboardInterrupt:
-        print("\n[-] Scan interrupted by user.")
+        msg = "Scan interrupted by user."
+        if console:
+            console.print(f"\n  [yellow]⚠[/yellow] {msg}")
+        else:
+            print(f"\n[-] {msg}")
         sys.exit(1)
-    
-    # 3. Generate Report
-    print("\n[*] Generating verification report...")
-    report_gen = ReportGenerator(results)
-    report_file = report_gen.to_markdown()
-    
-    print(f"\n[+] Scan Complete! High-confidence report saved to: {report_file}")
+
+    # Results summary
+    if console:
+        console.print()
+        console.rule("[bold bright_green]Scan Complete[/bold bright_green]")
+        console.print()
+        print_results_summary(console, scan_result)
+    else:
+        confirmed = scan_result.get_confirmed()
+        print(f"\n[+] Scan complete! {len(confirmed)} confirmed findings.")
+
+    # Generate Reports
+    report_gen = ReportGenerator(scan_result)
+
+    reports_generated = []
+    fmt = args.output_format
+
+    if fmt in ("markdown", "all"):
+        md_report = report_gen.to_markdown()
+        reports_generated.append(("Markdown", md_report))
+
+    if fmt in ("json", "all"):
+        json_report = report_gen.to_json()
+        reports_generated.append(("JSON", json_report))
+
+    if fmt in ("sarif", "all"):
+        sarif_report = report_gen.to_sarif()
+        reports_generated.append(("SARIF", sarif_report))
+
+    # Print report paths
+    if console:
+        console.print("[bold]📄 Reports Generated:[/bold]\n")
+        for name, path in reports_generated:
+            console.print(f"  [green]✓[/green] {name}: [link={path}]{path}[/link]")
+        console.print()
+    else:
+        print("\n[+] Reports Generated:")
+        for name, path in reports_generated:
+            print(f"  - {name}: {path}")
+
 
 if __name__ == "__main__":
     main()
