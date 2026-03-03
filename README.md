@@ -8,7 +8,6 @@
   <img src="https://img.shields.io/badge/License-Apache_2.0-red?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge&logoColor=white" />
   
-  <h1>🛡️ Pentas-Agent</h1>
   <p><strong>Enterprise-Grade, Multi-Agent AI Security Vulnerability Detection Engine</strong></p>
   
   <p>
@@ -260,4 +259,4 @@ After the scan sequence is complete, the results are natively stored in the `rep
 </div>
 
 ## Original Author 
-[Shiv Kumar](https://github.com/Shiv-kumar-AIML) -- M
+[Shiv Kumar](https://github.com/Shiv-kumar-AIML) -- MindRoots
