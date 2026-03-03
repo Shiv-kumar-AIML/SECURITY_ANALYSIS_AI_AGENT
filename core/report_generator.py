@@ -149,17 +149,19 @@ result = ast.literal_eval(user_data)
     },
     "vulnerable_dependency": {
         "why": "The project uses third-party packages with known security vulnerabilities (CVEs). Attackers can exploit these vulnerabilities if the affected package functionality is reachable from user input.",
-        "solution": "Upgrade the vulnerable dependency to the patched version. Run dependency audits regularly. Pin dependencies to specific safe versions.",
-        "code": """# In package.json — update the version:
-# "lodash": "^4.17.21"  (was: "^4.17.10")
+        "solution": "Upgrade the vulnerable dependency to the patched version. Run dependency audits regularly.",
+        "code": """# Check for vulnerable dependencies:
+npm audit
 
-# Run: npm audit fix
-# Or: npm update <package-name>
+# Auto-fix where possible:
+npm audit fix
 
-# In requirements.txt:
-# package>=safe_version
+# Force fix (may include breaking changes):
+npm audit fix --force
 
-# Run: pip install --upgrade <package-name>"""
+# Or manually update the specific package:
+npm update <package-name>
+npm install <package-name>@latest"""
     },
     "mark_safe": {
         "why": "mark_safe() tells Django to NOT escape HTML content in templates. If the marked content contains any user-controlled data, it creates an XSS vulnerability where attackers can inject malicious scripts.",
@@ -358,12 +360,62 @@ class ReportGenerator:
 
         return finding
 
+    @staticmethod
+    def _clean_code_block(text: str) -> str:
+        """Strip nested markdown backticks and LLM commentary from code blocks."""
+        if not text:
+            return ""
+        # Remove nested ```language ... ``` wrappers that LLM adds
+        cleaned = re.sub(r'```\w*\s*\n?', '', text)
+        # Remove trailing ``` closers
+        cleaned = cleaned.rstrip('`').strip()
+        # Remove LLM commentary lines (common patterns)
+        commentary_patterns = [
+            r'^Most automated findings.*$',
+            r'^The main security concern.*$',
+            r'^Overall,.*$',
+            r'^The codebase (?:contains|demonstrates|shows).*$',
+            r'^Some parameters.*$',
+            r'^Minor issues.*$',
+            r'^The code (?:appears|relies|does not).*$',
+        ]
+        lines = cleaned.split('\n')
+        filtered = []
+        for line in lines:
+            is_commentary = False
+            for pattern in commentary_patterns:
+                if re.match(pattern, line.strip(), re.IGNORECASE):
+                    is_commentary = True
+                    break
+            if not is_commentary:
+                filtered.append(line)
+        return '\n'.join(filtered).strip()
+
+    def _detect_language(self) -> str:
+        """Auto-detect code language from tech stack."""
+        raw = self.result.tech_stack or ""
+        tech = (", ".join(raw) if isinstance(raw, list) else str(raw)).lower()
+        if any(t in tech for t in ['typescript', 'tsx', 'react']):
+            return 'typescript'
+        elif any(t in tech for t in ['javascript', 'node', 'express']):
+            return 'javascript'
+        elif 'python' in tech or 'django' in tech:
+            return 'python'
+        elif 'java' in tech:
+            return 'java'
+        elif 'go' in tech:
+            return 'go'
+        elif 'php' in tech:
+            return 'php'
+        return ''
+
     def _format_finding(self, finding: Finding, index: int) -> str:
         """Format a single finding with COMPLETE details."""
         # Enrich the finding first
         finding = self._enrich_finding(finding)
 
         rel_path = self._get_relative_path(finding.file_path)
+        lang = self._detect_language()
         lines = []
 
         # Header
@@ -397,26 +449,31 @@ class ReportGenerator:
             lines.append(f"- **Line**: {line_info}")
         lines.append("")
 
-        # Code snippet
-        if finding.code_snippet and finding.code_snippet.strip() not in {"", "requires login", "No code", "N/A"}:
-            lines.append("```")
-            lines.append(finding.code_snippet.strip()[:800])
+        # Code snippet — clean nested backticks from LLM output
+        code_snippet = self._clean_code_block(finding.code_snippet or "")
+        if code_snippet and code_snippet.strip() not in {"", "requires login", "No code", "N/A"}:
+            lines.append(f"```{lang}")
+            lines.append(code_snippet[:800])
             lines.append("```")
             lines.append("")
 
-        # Why This Is Vulnerable — ALWAYS present
+        # Why This Is Vulnerable — ALWAYS present, clean LLM commentary
+        why_text = self._clean_code_block(finding.reasoning_chain or finding.description)
         lines.append("**Why This Is Vulnerable:**")
-        lines.append(finding.reasoning_chain or finding.description)
+        lines.append(why_text or finding.description)
         lines.append("")
 
         # Solution / Remediation — ALWAYS present
+        solution_text = self._clean_code_block(finding.remediation or "")
         lines.append("**Solution / Remediation:**")
-        lines.append(finding.remediation or "Review the code and apply security best practices for this vulnerability type.")
+        lines.append(solution_text or "Review the code and apply security best practices for this vulnerability type.")
         lines.append("")
 
-        if finding.remediation_code and finding.remediation_code.strip():
-            lines.append("```python")
-            lines.append(finding.remediation_code.strip()[:800])
+        # Solution code — clean nested backticks, use correct language
+        remedy_code = self._clean_code_block(finding.remediation_code or "")
+        if remedy_code:
+            lines.append(f"```{lang}")
+            lines.append(remedy_code[:800])
             lines.append("```")
             lines.append("")
 

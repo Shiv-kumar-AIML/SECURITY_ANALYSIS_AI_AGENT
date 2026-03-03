@@ -29,6 +29,7 @@ LAYER_2_SKILLS = [
     "sast-authorization-logic-engine.md",
     "sast-prototype-pollution-engine.md",
     "sast-secret-detection-engine.md",
+    "sast-web-misconfig-engine.md",
     "sca-dependency-engine.md"
 ]
 
