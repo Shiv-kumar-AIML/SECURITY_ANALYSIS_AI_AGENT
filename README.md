@@ -1,4 +1,7 @@
 <div align="center">
+  <img src="./assets/logo/logo.png" alt="Pentas-Agent Logo" width="200" style="border-radius: 12px; margin-bottom: 20px;" />
+  <br>
+  
   <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Engine-LLM_Reasoning-purple?style=for-the-badge&logo=openai&logoColor=white" />
@@ -255,3 +258,6 @@ After the scan sequence is complete, the results are natively stored in the `rep
 <div align="center">
   <p>Built for precision. Designed for production. 🛡️</p>
 </div>
+
+## Original Author 
+[Shiv Kumar](https://github.com/Shiv-kumar-AIML) -- M
