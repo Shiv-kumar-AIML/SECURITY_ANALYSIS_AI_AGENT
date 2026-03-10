@@ -72,27 +72,66 @@ def _is_safe_framework_pattern(finding: Finding) -> bool:
     code = (finding.code_snippet or "").lower()
     desc = (finding.description or "").lower()
     title = finding.title.lower()
+    file_path_lower = (finding.file_path or "").lower()
     
     # NEVER filter dependency CVEs — they are always real
     if 'cve-' in title or 'vulnerable dependency' in title:
+        return False
+    
+    # NEVER filter findings from deterministic pattern scanner (confidence >= 0.95)
+    # These are regex-matched hardcoded OTPs, stack trace leaks, etc. — always real
+    if finding.confidence >= 0.95 and finding.source.value in ('semgrep', 'pattern_scanner'):
         return False
     
     # NEVER filter findings from tool scanners that report dependencies
     if finding.source.value in ('trivy', 'npm_audit') and 'A06:2021' in (finding.owasp_category or ''):
         return False
     
+    # Prisma ORM queries are ALWAYS parameterized — NOT vulnerable to injection
+    # This prevents false 'NoSQL Injection' and 'SQL Injection' reports on Prisma
+    prisma_methods = ['prisma.', 'findunique', 'findfirst', 'findmany', 'create(', 
+                      'update(', 'delete(', 'upsert(', 'aggregate(', 'groupby(']
+    if any(inj in title for inj in ['injection', 'nosql injection', 'sql injection']):
+        if any(pm in code or pm in desc for pm in prisma_methods):
+            # Prisma parameterizes all queries — this is a false positive
+            return True
+    
+    # Prisma with user-controlled keys is NOT prototype pollution
+    if 'prototype pollution' in title or 'cwe-1321' in (finding.cwe_id or '').lower():
+        if any(pm in code or pm in desc for pm in prisma_methods):
+            # Prisma's typed API prevents prototype pollution
+            return True
+    
     # path.join() in Node.js is not inherently path traversal
     if 'path traversal' in title or 'cwe-22' in (finding.cwe_id or '').lower():
         if 'path.join(' in code and 'req.' not in code and 'request.' not in code:
-            return True  # path.join without user input is safe
+            # Check BOTH code snippet AND file path for upload context
+            upload_indicators = ['file.name', 'file_name', 'filename', 'upload', 'originalname',
+                                 'extension', 'ext', 'formdata', 'multipart', 'buffer',
+                                 'writefile', 'write_file', 'savefile', 'save_file']
+            has_user_input_in_code = any(indicator in code for indicator in upload_indicators)
+            has_user_input_in_path = any(indicator in file_path_lower for indicator in 
+                                         ['upload', 'file', 'media', 'attachment', 'asset'])
+            if not has_user_input_in_code and not has_user_input_in_path:
+                return True  # path.join without user input is safe
     
     # Crypto/hash imports are NOT secrets
     if 'secret' in title or 'hardcoded' in title:
         if any(safe in code for safe in ['bcrypt', 'argon2', 'hashlib', 'crypto.', 'pbkdf2']):
             return True
     
+    # NEVER filter hardcoded auth bypass values (OTP fallbacks, dev passwords)
+    # These often appear alongside process.env but ARE still vulnerabilities
+    auth_bypass_indicators = [
+        'otp', 'fallback', 'bypass', 'dev-', 'test-', '111111', '123456', '000000',
+        'hardcoded otp', 'hardcoded password', 'hardcoded token', 'auth bypass',
+        'authentication bypass', 'dev backdoor', 'fallback code', 'fallback otp',
+    ]
+    is_auth_bypass = any(ind in title or ind in desc for ind in auth_bypass_indicators)
+    
     # Environment variables used for secrets = CORRECT practice, NOT hardcoded
-    if 'secret' in title or 'hardcoded' in title or 'cwe-798' in (finding.cwe_id or '').lower():
+    # BUT: do NOT filter if the finding is about a hardcoded auth bypass value
+    if not is_auth_bypass and ('secret' in title or 'hardcoded' in title or 'cwe-798' in (finding.cwe_id or '').lower()):
         env_patterns = [
             'process.env', 'os.environ', 'os.getenv(', 'config(',
             'from env', 'from @shared/config/env',
@@ -123,7 +162,9 @@ def _is_safe_framework_pattern(finding: Finding) -> bool:
     no_vuln_title_phrases = [
         'no vulnerabilit', 'not vulnerable', 'none found',
         'no issues found', 'no findings found', 'not applicable',
-        '— no ', '- no ',
+        '— no ', '- no ', 'no evident', 'no direct',
+        'no injection', 'no command injection', 'no code execution',
+        'properly validated', 'correctly implemented',
     ]
     for phrase in no_vuln_title_phrases:
         if phrase in title:
@@ -197,11 +238,27 @@ class VerifierAgent(BaseAgent):
 
     VERIFIER_SYSTEM_PROMPT = """You are a senior security engineer performing FINAL verification of vulnerability findings.
 
-## CRITICAL: You Must REDUCE False Positives
-Most automated scanners over-report. Your job is to ELIMINATE findings that are NOT real vulnerabilities.
+## IMPORTANT: TWO TYPES OF VALID FINDINGS
+You must handle BOTH types correctly:
 
-## Dataflow Verification Process
-For EACH finding, verify these IN ORDER:
+### Type A: Dataflow Vulnerabilities
+These require SOURCE → FLOW → SINK proof. If the framework protects against it, mark FALSE_POSITIVE.
+
+### Type B: Missing Security Controls (ALWAYS CONFIRM)
+These findings about MISSING controls are ALWAYS valid and should be CONFIRMED:
+- Hardcoded fallback credentials (OTP codes, passwords, tokens) — ALWAYS CRITICAL
+- Missing authentication on admin/privileged endpoints — ALWAYS CRITICAL  
+- Stack traces / error details returned to clients — ALWAYS HIGH
+- Missing security headers (CSP, HSTS, X-Frame-Options) — ALWAYS MEDIUM
+- Missing cookie security flags (httpOnly, secure, sameSite) — ALWAYS MEDIUM
+- Missing rate limiting on auth endpoints — ALWAYS MEDIUM
+- Weak password policy — ALWAYS MEDIUM
+- User enumeration via different error messages — ALWAYS MEDIUM
+- Insecure randomness (Math.random for security) — ALWAYS MEDIUM
+**DO NOT mark Type B findings as FALSE_POSITIVE. They do not need a dataflow path.**
+
+## Dataflow Verification Process (for Type A only)
+For EACH Type A finding, verify these IN ORDER:
 
 ### 1. SOURCE CHECK
 - Does untrusted user input actually reach this code?
@@ -209,37 +266,44 @@ For EACH finding, verify these IN ORDER:
 
 ### 2. FRAMEWORK PROTECTION CHECK
 - **Django ORM**: `.objects.filter()`, `.objects.get()`, QuerySets are parameterized → NOT SQL injection
+- **Prisma ORM**: Uses parameterized queries → NOT SQL injection
 - **TypeScript**: Strong typing prevents many injection types
-- **JWT Libraries**: jsonwebtoken, PyJWT handle validation → NOT auth bypass
-- **CSRF Middleware**: Django/Express CSRF middleware protects POST routes by default
-- **Template Engines**: Django templates, Jinja2 auto-escape HTML by default → NOT XSS (unless mark_safe/|safe used)
+- **JWT Libraries**: jose, jsonwebtoken handle validation → auth bypass only if misconfigured
+- **Template Engines**: Auto-escape HTML by default → NOT XSS (unless mark_safe/|safe used)
 
 ### 3. SANITIZATION CHECK  
 - Is the input validated/sanitized BEFORE reaching the dangerous function?
-- Look for: validators, regex checks, type casting, allowlists, Django forms
 - If properly sanitized → FALSE_POSITIVE
 
 ### 4. REACHABILITY CHECK
 - Is this code reachable from a public endpoint?
-- Is it behind authentication/authorization?
 - Is it dead code, test code, or behind a feature flag?
 
-### 5. EXPLOITABILITY CHECK
-- Can an attacker ACTUALLY exploit this in production?
-- What preconditions are needed?
-- What is the real-world impact?
-
 ## VERDICT RULES
-- **CONFIRMED**: Untrusted input reaches a dangerous sink WITHOUT proper sanitization
+- **CONFIRMED**: 
+  - Type A: Untrusted input reaches a dangerous sink WITHOUT proper sanitization
+  - Type B: A security control is MISSING (no dataflow needed)
+  - Hardcoded auth bypass values (OTP '111111', dev passwords) — ALWAYS CONFIRMED + CRITICAL
+  - Admin endpoint without auth check — ALWAYS CONFIRMED + CRITICAL
 - **FALSE_POSITIVE**: Any of these:
   - ORM/parameterized query flagged as SQL injection
   - path.join() without user input flagged as path traversal
   - Template auto-escaping flagged as XSS
   - Test/example/mock code
-  - Internal-only utilities
   - Properly sanitized input
-  - Lock file entries (duplicates of manifest findings)
+  - A finding that says "no vulnerabilities found" — this is NOT a finding at all
 - **NEEDS_REVIEW**: Cannot determine with certainty
+
+## Severity Assignment for Type B Findings
+- Hardcoded auth bypass (OTP/password fallback): **CRITICAL**
+- Unauthenticated admin endpoints: **CRITICAL**
+- Stack trace leaks in responses: **HIGH**
+- Unauthenticated file uploads: **HIGH**
+- Missing cookie security flags: **MEDIUM**
+- Missing security headers: **MEDIUM**
+- Missing rate limiting on auth: **MEDIUM**
+- User enumeration: **MEDIUM**
+- Weak password policy: **MEDIUM**
 
 ## Output Format
 For each finding:
@@ -249,7 +313,7 @@ VERIFICATION:
 - Verdict: [CONFIRMED / FALSE_POSITIVE / NEEDS_REVIEW]
 - Confidence: [0.0 to 1.0]
 - Reasoning: [Specific dataflow/framework reasoning]
-- Adjusted Severity: [same / CRITICAL / HIGH / MEDIUM / LOW / INFO]
+- Adjusted Severity: [CRITICAL / HIGH / MEDIUM / LOW / INFO / same]
 ```
 """
 
@@ -296,10 +360,11 @@ VERIFICATION:
             f"## Findings to Verify ({batch_label})\n{findings_text}\n\n"
             f"## Peer Agent Context\n{self.get_peer_context()}\n\n"
             f"## Source Code\n<CODE>\n{code_context[:15000]}\n</CODE>\n\n"
-            f"Verify EACH finding using DATAFLOW ANALYSIS. "
-            f"Check: (1) Does user input reach this code? (2) Does the framework protect it? "
-            f"(3) Is there sanitization? (4) Is it test/example code? "
-            f"Be AGGRESSIVE about marking FALSE_POSITIVE for pattern-based findings that don't have a real dataflow path."
+            f"Verify EACH finding carefully. "
+            f"For Type A (dataflow) findings: Check (1) Does user input reach this code? (2) Does the framework protect it? (3) Is there sanitization? "
+            f"For Type B (missing controls) findings: These are VALID if a security control is genuinely missing. DO NOT mark them as false positives. "
+            f"Mark FALSE_POSITIVE ONLY for findings that are clearly wrong — ORM queries as SQL injection, auto-escaped templates as XSS, test code, etc. "
+            f"PRESERVE findings about: hardcoded auth bypasses, missing admin auth, stack trace leaks, missing headers, insecure cookies, rate limiting gaps."
         )
 
         return self.run_with_reasoning(prompt, system_prompt=self.VERIFIER_SYSTEM_PROMPT)

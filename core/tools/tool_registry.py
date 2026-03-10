@@ -8,6 +8,7 @@ from .bandit_scanner import BanditScanner
 from .trivy_scanner import TrivyScanner
 from .gitleaks_scanner import GitleaksScanner
 from .npm_audit import NpmAuditScanner
+from .hardcoded_pattern_scanner import HardcodedPatternScanner
 from ..findings import Finding
 
 
@@ -18,6 +19,7 @@ ALL_TOOLS = [
     TrivyScanner,
     GitleaksScanner,
     NpmAuditScanner,
+    HardcodedPatternScanner,
 ]
 
 

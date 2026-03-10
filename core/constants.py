@@ -30,7 +30,9 @@ LAYER_2_SKILLS = [
     "sast-prototype-pollution-engine.md",
     "sast-secret-detection-engine.md",
     "sast-web-misconfig-engine.md",
-    "sca-dependency-engine.md"
+    "sca-dependency-engine.md",
+    "sast-auth-bypass-engine.md",
+    "sast-security-hardening-engine.md",
 ]
 
 LAYER_3_SKILLS = [
@@ -88,6 +90,13 @@ CWE_MAP = {
     "xxe": {"id": "CWE-611", "name": "XML External Entity", "owasp": "A05:2021 Security Misconfig"},
     "idor": {"id": "CWE-639", "name": "Insecure Direct Object Reference", "owasp": "A01:2021 Broken Access Control"},
     "race_condition": {"id": "CWE-362", "name": "Race Condition", "owasp": "A04:2021 Insecure Design"},
+    "auth_bypass": {"id": "CWE-287", "name": "Authentication Bypass", "owasp": "A07:2021 Auth Failures"},
+    "missing_rate_limit": {"id": "CWE-307", "name": "Missing Brute-Force Protection", "owasp": "A07:2021 Auth Failures"},
+    "info_exposure": {"id": "CWE-209", "name": "Information Exposure via Error", "owasp": "A05:2021 Security Misconfig"},
+    "insecure_cookie": {"id": "CWE-614", "name": "Insecure Cookie Flags", "owasp": "A05:2021 Security Misconfig"},
+    "weak_password": {"id": "CWE-521", "name": "Weak Password Requirements", "owasp": "A07:2021 Auth Failures"},
+    "user_enumeration": {"id": "CWE-204", "name": "User Enumeration via Response", "owasp": "A07:2021 Auth Failures"},
+    "insecure_randomness": {"id": "CWE-330", "name": "Insecure Randomness", "owasp": "A02:2021 Crypto Failures"},
 }
 
 # Severity thresholds

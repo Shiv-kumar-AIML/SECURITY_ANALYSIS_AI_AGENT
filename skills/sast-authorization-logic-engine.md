@@ -1,7 +1,7 @@
 ---
 name: sast-authorization-logic-engine
 description: Broken Access Control & Authorization Logic — methodology-based analysis
-version: 4.0.0
+version: 5.0.0
 ---
 
 # Authorization & Access Control Engine
@@ -11,46 +11,58 @@ Find broken access control vulnerabilities — missing authentication on endpoin
 
 ## Step-by-Step Analysis
 
-### Step 1: Map All Routes and Their Protection
-Go through every route definition in the application:
+### Step 1: Map ALL Routes and Their Protection
+Go through EVERY route definition in the application:
 - List all endpoints (GET, POST, PUT, DELETE)
 - For each, identify what middleware/guards are applied (auth, role checks, etc.)
 - Flag any state-changing endpoint (POST, PUT, DELETE) that has NO authentication middleware
 - Flag endpoints that handle sensitive data without proper auth
 
-### Step 2: Check Authorization Depth
+### Step 2: CRITICAL — Check Admin/Management Endpoints
+**This is the highest priority check:**
+- Find ALL endpoints in `admin/`, `management/`, `internal/`, or similar privileged paths
+- For EACH admin endpoint: Is there an authentication check?
+- For EACH admin endpoint: Is there a role/permission check (e.g., `role === 'ADMIN'`)?
+- **An admin endpoint with NO auth is ALWAYS CRITICAL severity**
+- Look for admin operations like: approve/reject users, delete accounts, modify roles, access all users' data
+
+### Step 3: Check Authorization Depth
 Authentication (who are you?) is not the same as authorization (what can you do?):
 - Does the endpoint check if the authenticated user has the right ROLE for this action?
 - Does the endpoint verify OWNERSHIP — can user A access user B's data?
 - Are admin-only operations restricted to admin roles?
 - Is role information trusted from the token, or verified from the database?
 
-### Step 3: Check Direct Object References
+### Step 4: Check Direct Object References
 For any endpoint that accesses resources by ID:
 - Does the code verify that the requesting user owns or has permission to access that resource?
 - Can a user change the ID in the URL/body to access another user's data?
 - Are there any filters applied to restrict results to the current user?
 
-### Step 4: Check Data Exposure in Responses
+### Step 5: Check Data Exposure in Responses
 - Does the API return more data than the client needs?
 - Are sensitive fields (password hashes, internal IDs, tokens, secrets) included in responses?
 - Are error messages revealing internal information (stack traces, DB queries)?
+- **Are error responses returning `error.stack` or `traceback` to the client?**
 
-### Step 5: Check for Mass Assignment
-- Can users set fields they shouldn't (role, isAdmin, balance, verified) by including extra fields in the request body?
+### Step 6: Check for Mass Assignment
+- Can users set fields they shouldn't (role, isAdmin, balance, verified, isVerified) by including extra fields in the request body?
 - Does the code whitelist allowed fields, or does it accept everything from the request?
+- **Specifically check: can a user set `role`, `isVerified`, `isAdmin`, `permissions` via the request body?**
 
-### Step 6: Check for Privilege Escalation Paths
+### Step 7: Check for Privilege Escalation Paths
 - Can a regular user access admin endpoints?
 - Can a user modify their own role/permissions?
 - Are there hidden/undocumented endpoints without auth?
+- Can a client-role user access trainer-role or admin-role endpoints?
 
 ## Key Principle
-**Every endpoint that accesses user-specific data MUST verify ownership. Every state-changing endpoint MUST verify permission.**
+**Every endpoint that accesses user-specific data MUST verify ownership. Every state-changing endpoint MUST verify permission. Every admin endpoint MUST verify admin role.**
 
 ## What NOT to Report
 - Public endpoints that are intentionally unauthenticated (login, register, public pages)
 - Endpoints with proper auth middleware AND ownership checks in the controller
+- Read-only public listing endpoints (e.g., viewing trainer profiles by clients)
 
 ## Output Format
 ```
@@ -70,3 +82,4 @@ VULNERABILITY:
 
 ## Example (for reference only)
 A route that accepts a user ID from URL parameters and returns that user's data without verifying that the requesting user is the same user or an admin is an IDOR vulnerability. An attacker can change the ID to access any user's data. The fix is to verify `requestingUser.id === targetUser.id` or check for admin role before returning data.
+

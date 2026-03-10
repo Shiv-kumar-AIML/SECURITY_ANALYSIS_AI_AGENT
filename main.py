@@ -29,17 +29,17 @@ except ImportError:
 
 BANNER = """
 [bold bright_cyan]
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║          🛡️  SECURITY ANALYSIS AGENT  v2.0                   ║
-  ║       Multi-Agent Reasoning-Based Vulnerability Scanner      ║
-  ╚═══════════════════════════════════════════════════════════════╝
+  ╔═════════════════════════════════════════════════════════════╗
+  ║          🛡️  SECURITY ANALYSIS AGENT  v2.0                  ║
+  ║       Multi-Agent Reasoning-Based Vulnerability Scanner     ║
+  ╚═════════════════════════════════════════════════════════════╝
 [/bold bright_cyan]"""
 
 BANNER_PLAIN = """
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║          🛡️  SECURITY ANALYSIS AGENT  v2.0                   ║
-  ║       Multi-Agent Reasoning-Based Vulnerability Scanner      ║
-  ╚═══════════════════════════════════════════════════════════════╝
+  ╔═════════════════════════════════════════════════════════════╗
+  ║          🛡️  SECURITY ANALYSIS AGENT  v2.0                  ║
+  ║       Multi-Agent Reasoning-Based Vulnerability Scanner     ║
+  ╚═════════════════════════════════════════════════════════════╝
 """
 
 

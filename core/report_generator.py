@@ -46,106 +46,82 @@ subprocess.run(["ls", validated_path], shell=False)"""
     },
     "xss": {
         "why": "User-supplied data is rendered in HTML output without proper escaping. An attacker can inject JavaScript code that executes in other users' browsers, stealing cookies, credentials, or performing actions on their behalf.",
-        "solution": "Always escape user input before rendering in HTML. Use framework-provided template engines (Django templates auto-escape by default). Avoid mark_safe(), HttpResponse with user data, and direct DOM manipulation.",
-        "code": """# VULNERABLE:
-return HttpResponse(user_input)
-return mark_safe(user_data)
+        "solution": "Always escape user input before rendering in HTML. Use framework-provided template engines. Avoid mark_safe(), HttpResponse with user data, and direct DOM manipulation.",
+        "code": """# VULNERABLE (Node.js/Express):
+res.send(`<p>${userInput}</p>`);
 
-# FIXED (use template engine):
-return render(request, 'template.html', {'data': user_data})
+# FIXED (use a template engine like EJS with auto-escaping):
+res.render('template', { data: userInput });
 
-# FIXED (manual escape):
-from django.utils.html import escape
-return HttpResponse(escape(user_input))
-
-# FIXED (use format_html instead of mark_safe):
-from django.utils.html import format_html
-return format_html('<p>{}</p>', user_data)"""
+# FIXED (manual escape with DOMPurify):
+import DOMPurify from 'dompurify';
+const clean = DOMPurify.sanitize(userInput);"""
     },
     "open_redirect": {
-        "why": "The application redirects users to a URL provided in the request (e.g., a 'next' parameter) without validating it. An attacker can craft a URL that redirects users to a malicious site for phishing.",
-        "solution": "Validate redirect URLs using Django's url_has_allowed_host_and_scheme() (or is_safe_url in older versions). Only allow redirects to your own domain.",
-        "code": """# VULNERABLE:
-next_url = request.GET.get('next')
-return redirect(next_url)
+        "why": "The application redirects users to a URL provided in the request without validating it. An attacker can craft a URL that redirects to a malicious site for phishing.",
+        "solution": "Validate redirect URLs against an allowlist of domains. Only allow redirects to your own domain.",
+        "code": """// VULNERABLE:
+const next = req.query.next;
+res.redirect(next);
 
-# FIXED:
-from django.utils.http import url_has_allowed_host_and_scheme
-
-next_url = request.GET.get('next', '/')
-if url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-    return redirect(next_url)
-else:
-    return redirect('/')"""
+// FIXED:
+const allowedHosts = [process.env.APP_DOMAIN];
+const url = new URL(req.query.next, `https://${process.env.APP_DOMAIN}`);
+if (allowedHosts.includes(url.hostname)) {
+  res.redirect(url.toString());
+} else {
+  res.redirect('/');
+}"""
     },
     "csrf": {
-        "why": "The @csrf_exempt decorator disables Django's CSRF protection for this view. An attacker can trick authenticated users into submitting malicious requests without their knowledge.",
-        "solution": "Remove @csrf_exempt and use Django's built-in CSRF protection. For AJAX requests, include the CSRF token in the request header.",
-        "code": """# VULNERABLE:
-@csrf_exempt
-def payment_view(request):
-    # processes payment without CSRF protection
-    pass
-
-# FIXED (remove csrf_exempt, use CSRF token):
-def payment_view(request):
-    # Django CSRF middleware automatically validates
-    pass
-
-# For AJAX, include CSRF token in JavaScript:
-# headers: {'X-CSRFToken': getCookie('csrftoken')}"""
+        "why": "CSRF protection is missing or disabled. An attacker can trick authenticated users into submitting malicious requests.",
+        "solution": "Enable CSRF protection. For Next.js API routes, validate the Origin/Referer header or use CSRF tokens.",
+        "code": """// FIXED (Next.js — validate Origin header):
+const origin = request.headers.get('origin');
+const allowedOrigins = [process.env.NEXT_PUBLIC_APP_URL];
+if (!allowedOrigins.includes(origin)) {
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+}"""
     },
     "hardcoded_secret": {
-        "why": "Sensitive credentials (API keys, passwords, tokens) are hardcoded in the source code. Anyone with access to the repository can extract and misuse them. If the repo is public, the secrets are fully exposed.",
-        "solution": "Move all secrets to environment variables or a secrets manager (AWS Secrets Manager, HashiCorp Vault, .env files excluded from git).",
-        "code": """# VULNERABLE:
-API_KEY = "sk-1234567890abcdef"
-DB_PASSWORD = "super_secret_password"
+        "why": "Sensitive credentials (API keys, passwords, tokens) are hardcoded in the source code. Anyone with access to the repository can extract and misuse them.",
+        "solution": "Move all secrets to environment variables or a secrets manager. Never commit secrets to git.",
+        "code": """// VULNERABLE:
+const API_KEY = 'sk-1234567890abcdef';
 
-# FIXED (use environment variables):
-import os
-API_KEY = os.environ.get('API_KEY')
-DB_PASSWORD = os.environ.get('DB_PASSWORD')
+// FIXED (use environment variables):
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) throw new Error('API_KEY must be set');
 
-# FIXED (use python-decouple):
-from decouple import config
-API_KEY = config('API_KEY')"""
+// For Next.js, use .env.local (gitignored):
+// API_KEY=sk-your-key-here"""
     },
     "unvalidated_password": {
-        "why": "Passwords are being set on user objects without running Django's password validators. This allows users to set weak passwords (e.g., '123', 'password'), making accounts vulnerable to brute-force attacks.",
-        "solution": "Always validate passwords using Django's built-in password validation before setting them. Use validate_password() or Django forms with password validation.",
-        "code": """# VULNERABLE:
-user.set_password(raw_password)
-user.save()
+        "why": "Password validation only checks length, allowing weak passwords (e.g., '12345678', 'password') that are vulnerable to brute-force and dictionary attacks.",
+        "solution": "Enforce password complexity: minimum length, uppercase, lowercase, digits, and special characters.",
+        "code": """// VULNERABLE:
+if (password.length < 8) { return error; }
 
-# FIXED:
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError
-
-try:
-    validate_password(raw_password, user)
-    user.set_password(raw_password)
-    user.save()
-except ValidationError as e:
-    # Handle invalid password — return errors to user
-    return {'errors': e.messages}"""
+// FIXED (enforce complexity):
+function validatePassword(password: string): string | null {
+  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[A-Z]/.test(password)) return 'Must contain an uppercase letter';
+  if (!/[a-z]/.test(password)) return 'Must contain a lowercase letter';
+  if (!/[0-9]/.test(password)) return 'Must contain a digit';
+  if (!/[!@#$%^&*]/.test(password)) return 'Must contain a special character';
+  return null;
+}"""
     },
     "eval_usage": {
-        "why": "eval() executes arbitrary Python code from a string. If any part of that string comes from user input, an attacker can execute arbitrary code on the server, leading to full system compromise.",
-        "solution": "Remove eval() entirely. Use json.loads() for JSON parsing, ast.literal_eval() for safe literal evaluation, or implement proper parsers for structured input.",
-        "code": """# VULNERABLE:
-result = eval(user_expression)
+        "why": "eval() executes arbitrary code from a string. If any part of that string comes from user input, an attacker can execute arbitrary code on the server.",
+        "solution": "Remove eval() entirely. Use JSON.parse() for JSON, or implement proper parsers.",
+        "code": """// VULNERABLE:
+const result = eval(userExpression);
 
-# FIXED (for JSON):
-import json
-result = json.loads(user_data)
+// FIXED (for JSON):
+const result = JSON.parse(userData);
 
-# FIXED (for safe literals like dicts/lists):
-import ast
-result = ast.literal_eval(user_data)
-
-# FIXED (for math expressions):
-# Use a safe expression parser library instead"""
+// FIXED (for math): use a safe expression library like 'mathjs'"""
     },
     "vulnerable_dependency": {
         "why": "The project uses third-party packages with known security vulnerabilities (CVEs). Attackers can exploit these vulnerabilities if the affected package functionality is reachable from user input.",
@@ -163,8 +139,137 @@ npm audit fix --force
 npm update <package-name>
 npm install <package-name>@latest"""
     },
+    # ─── Node.js / Express / Next.js specific templates ───
+    "path_traversal": {
+        "why": "User-controlled input (filenames, paths, extensions) is used in file system operations without sanitization. An attacker can traverse directories using '../' sequences to read or write arbitrary files.",
+        "solution": "Sanitize filenames by stripping path separators and traversal sequences. Use path.basename() to extract only the filename. Validate the resolved path stays within the intended directory.",
+        "code": """// VULNERABLE:
+const filePath = path.join(uploadDir, file.name);
+await writeFile(filePath, buffer);
+
+// FIXED:
+import path from 'path';
+
+const safeName = path.basename(file.name).replace(/[^\\w.-]/g, '');
+const safeExt = safeName.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'bin';
+const filename = `${uuidv4()}.${safeExt}`;
+const filePath = path.resolve(uploadDir, filename);
+
+// Verify resolved path is within allowed directory
+if (!filePath.startsWith(path.resolve(uploadDir) + path.sep)) {
+  throw new Error('Path traversal detected');
+}
+await writeFile(filePath, buffer);"""
+    },
+    "jwt_vulnerability": {
+        "why": "JWT tokens may be vulnerable to algorithm confusion attacks, weak secrets, or missing validation. If tokens are not properly verified, attackers can forge authentication tokens.",
+        "solution": "Always explicitly specify the allowed algorithm when verifying. Use strong secrets (256+ bits). Set appropriate expiration times.",
+        "code": """// FIXED (jose library — already handles algorithm enforcement):
+import { jwtVerify } from 'jose';
+
+const secret = new TextEncoder().encode(process.env.JWT_SECRET);
+const { payload } = await jwtVerify(token, secret, {
+  algorithms: ['HS256'],  // Explicitly restrict algorithm
+  maxTokenAge: '1h',       // Limit token lifetime
+});"""
+    },
+    "missing_security_headers": {
+        "why": "The application does not set security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options), leaving it vulnerable to clickjacking, MIME sniffing, and cross-site attacks.",
+        "solution": "Add security headers in next.config.js or middleware. For Express, use the helmet middleware.",
+        "code": """// FIXED (next.config.js):
+const nextConfig = {
+  async headers() {
+    return [{
+      source: '/(.*)',
+      headers: [
+        { key: 'X-Frame-Options', value: 'DENY' },
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
+        { key: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'" },
+      ],
+    }];
+  },
+};
+
+// FIXED (Express — use helmet):
+import helmet from 'helmet';
+app.use(helmet());"""
+    },
+    "insecure_cookie": {
+        "why": "Authentication cookies are missing security flags, making them vulnerable to theft via XSS (missing httpOnly), network interception (missing secure), or CSRF (missing sameSite).",
+        "solution": "Set all three security flags on authentication cookies: httpOnly, secure, and sameSite.",
+        "code": """// VULNERABLE:
+cookies.set('accessToken', token);
+
+// FIXED:
+cookies.set('accessToken', token, {
+  httpOnly: true,                                // Prevents JavaScript access (XSS protection)
+  secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+  sameSite: 'lax',                               // CSRF protection
+  maxAge: 15 * 60,                               // 15 minutes
+  path: '/',
+});"""
+    },
+    "auth_bypass": {
+        "why": "Hardcoded fallback credentials (OTP codes, passwords, tokens) allow authentication bypass. Even if gated behind environment checks, misconfiguration in production can activate the bypass.",
+        "solution": "Remove all hardcoded fallback credentials. Use proper OTP validation against the database in all environments.",
+        "code": """// VULNERABLE:
+const isDevFallback = otp === '111111' && !process.env.TWILIO_ACCOUNT_SID;
+if (!validOtp && !isDevFallback) { reject(); }
+
+// FIXED (remove fallback entirely):
+const validOtp = await prisma.otp.findFirst({
+  where: { phone, code: otp, used: false, expiresAt: { gt: new Date() } }
+});
+if (!validOtp) {
+  return NextResponse.json({ error: 'Invalid or expired OTP' }, { status: 400 });
+}
+await prisma.otp.update({ where: { id: validOtp.id }, data: { used: true } });"""
+    },
+    "stack_trace_leak": {
+        "why": "Stack traces and internal error details are returned in API responses. This exposes internal code structure, file paths, and library versions to attackers, aiding reconnaissance.",
+        "solution": "Never return error.stack or internal error details to clients. Log them server-side and return generic error messages.",
+        "code": """// VULNERABLE:
+return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 });
+
+// FIXED:
+console.error('Internal error:', error);  // Log full error server-side
+return NextResponse.json(
+  { success: false, message: 'Internal server error' },
+  { status: 500 }
+);"""
+    },
+    "insecure_randomness": {
+        "why": "Math.random() is not cryptographically secure. It uses a predictable PRNG that can be reverse-engineered, allowing attackers to predict generated OTP codes, session IDs, or tokens.",
+        "solution": "Use crypto.randomInt() or crypto.randomBytes() for security-sensitive random values.",
+        "code": """// VULNERABLE:
+const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+const serviceId = Math.random().toString(36).substring(2, 12);
+
+// FIXED (Node.js crypto):
+import crypto from 'crypto';
+const otpCode = crypto.randomInt(100000, 999999).toString();
+const serviceId = crypto.randomBytes(6).toString('hex');"""
+    },
+    "weak_password_policy": {
+        "why": "Password validation only checks minimum length (e.g., 8 characters). This allows weak passwords like '12345678' or 'password' that are trivially guessable.",
+        "solution": "Enforce password complexity requirements: minimum length, mixed case, digits, and special characters.",
+        "code": """// VULNERABLE:
+if (password.length < 8) { return 'Too short'; }
+
+// FIXED:
+function validatePassword(password: string): string | null {
+  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[A-Z]/.test(password)) return 'Must contain uppercase letter';
+  if (!/[a-z]/.test(password)) return 'Must contain lowercase letter';
+  if (!/[0-9]/.test(password)) return 'Must contain a digit';
+  if (!/[!@#$%^&*()_+=-]/.test(password)) return 'Must contain special character';
+  return null;
+}"""
+    },
     "mark_safe": {
-        "why": "mark_safe() tells Django to NOT escape HTML content in templates. If the marked content contains any user-controlled data, it creates an XSS vulnerability where attackers can inject malicious scripts.",
+        "why": "mark_safe() tells Django to NOT escape HTML content in templates. If the marked content contains any user-controlled data, it creates an XSS vulnerability.",
         "solution": "Replace mark_safe() with format_html() which safely escapes parameters while keeping the HTML structure.",
         "code": """# VULNERABLE:
 from django.utils.safestring import mark_safe
@@ -175,34 +280,26 @@ from django.utils.html import format_html
 html = format_html('<a href="{}">{}</a>', url, user_text)"""
     },
     "query_set_extra": {
-        "why": "QuerySet.extra() allows raw SQL to be injected into Django ORM queries. If any user input reaches the extra() parameters, it can lead to SQL injection. Django documentation itself warns against using extra().",
-        "solution": "Replace .extra() with Django ORM methods like .annotate(), .filter(), .values(), or use RawSQL with proper parameterization.",
+        "why": "QuerySet.extra() allows raw SQL to be injected into Django ORM queries. Django documentation itself warns against using extra().",
+        "solution": "Replace .extra() with Django ORM methods like .annotate(), .filter(), .values().",
         "code": """# VULNERABLE:
 qs.extra(where=["name = '%s'" % user_input])
 
 # FIXED (use ORM):
-qs.filter(name=user_input)
-
-# FIXED (if raw SQL needed, use params):
-from django.db.models import Q
-qs.filter(Q(name=user_input))"""
+qs.filter(name=user_input)"""
     },
     "http_response_direct": {
-        "why": "Directly passing data to HttpResponse bypasses Django's template engine XSS protections. If the response content includes any user-supplied data, attackers can inject HTML/JavaScript.",
-        "solution": "Use Django's render() with templates instead of HttpResponse with dynamic content. Templates auto-escape by default.",
+        "why": "Directly passing data to HttpResponse bypasses template engine XSS protections.",
+        "solution": "Use render() with templates instead of HttpResponse with dynamic content.",
         "code": """# VULNERABLE:
 return HttpResponse(f"Hello {user_name}")
 
-# FIXED (use template):
-return render(request, 'greeting.html', {'name': user_name})
-
-# FIXED (for JSON API responses):
-from django.http import JsonResponse
-return JsonResponse({'greeting': f'Hello {user_name}'})"""
+# FIXED:
+return render(request, 'greeting.html', {'name': user_name})"""
     },
     "blocktranslate_no_escape": {
-        "why": "Translated strings in {% blocktranslate %} tags are not escaped by default. If a translator adds malicious HTML/JavaScript in their translation, it will be rendered as-is in the template.",
-        "solution": "Apply the force_escape filter to translated variables, or use the |escape filter on template variables inside blocktranslate.",
+        "why": "Translated strings in {% blocktranslate %} tags are not escaped by default.",
+        "solution": "Apply the force_escape filter to translated variables.",
         "code": """<!-- VULNERABLE: -->
 {% blocktranslate %}Welcome {{ username }}{% endblocktranslate %}
 
@@ -219,16 +316,28 @@ def _match_remediation_template(finding: Finding) -> dict:
     cwe = finding.cwe_id.lower() if finding.cwe_id else ""
 
     # Direct keyword matching
+    # Direct keyword matching (ORDER MATTERS — more specific first)
     matches = {
+        # Specific Node.js/Express/Next.js patterns first
+        "auth_bypass": ["auth bypass", "hardcoded otp", "otp bypass", "fallback otp", "fallback code",
+                        "cwe-287", "authentication bypass", "dev backdoor"],
+        "stack_trace_leak": ["stack trace", "error.stack", "cwe-209", "stack leak"],
+        "insecure_randomness": ["math.random", "insecure random", "cwe-330", "predictable"],
+        "weak_password_policy": ["password policy", "password.length", "weak password"],
+        "missing_security_headers": ["security header", "csp", "hsts", "x-frame-options", "missing header", "cwe-693"],
+        "insecure_cookie": ["cookie flag", "httponly", "samesite", "insecure cookie", "cwe-614"],
+        "path_traversal": ["path traversal", "cwe-22", "path.join", "path join", "directory traversal"],
+        "jwt_vulnerability": ["jwt", "cwe-327", "cwe-347", "algorithm confusion", "jwtverify"],
+        # Generic patterns after
         "sql_injection": ["sql injection", "cwe-89", "query set extra", "query-set-extra", "extends custom expression"],
         "command_injection": ["command injection", "cwe-78", "os.system", "subprocess"],
         "xss": ["cross-site scripting", "xss", "cwe-79", "direct use of httpresponse", "http_response"],
-        "open_redirect": ["open redirect", "cwe-601", "redirect"],
+        "open_redirect": ["open redirect", "cwe-601"],
         "csrf": ["csrf", "cwe-352", "csrf_exempt", "no csrf"],
-        "hardcoded_secret": ["secret", "hardcoded", "cwe-798", "api key", "password.*literal"],
+        "hardcoded_secret": ["hardcoded secret", "hardcoded credential", "cwe-798", "api key exposed"],
         "unvalidated_password": ["unvalidated password", "cwe-521", "password validation"],
-        "eval_usage": ["eval", "cwe-95", "eval()"],
-        "vulnerable_dependency": ["cve-", "vulnerable", "cwe-1321", "prototype pollution", "dependency"],
+        "eval_usage": ["eval(", "cwe-95"],
+        "vulnerable_dependency": ["cve-", "vulnerable dependency", "cwe-1321", "prototype pollution"],
         "mark_safe": ["mark_safe", "avoid mark safe"],
         "query_set_extra": ["query set extra", "queryset.extra"],
         "http_response_direct": ["httpresponse", "direct use of http"],
@@ -249,22 +358,64 @@ class ReportGenerator:
         if not REPORTS_DIR.exists():
             REPORTS_DIR.mkdir(parents=True)
 
+    @staticmethod
+    def _normalize_file_path(file_path: str) -> str:
+        """Extract normalized filename for dedup (just the relative tail)."""
+        # Strip cloned_repos/repo_name prefix and take only the app-relative path
+        if 'cloned_repos/' in file_path:
+            parts = file_path.split('cloned_repos/')
+            if len(parts) > 1:
+                repo_rest = parts[1]
+                slash_idx = repo_rest.find('/')
+                if slash_idx >= 0:
+                    return repo_rest[slash_idx + 1:]
+        return os.path.basename(file_path)
+
+    @staticmethod
+    def _extract_cwe_number(cwe_id: str) -> str:
+        """Extract just the CWE number for dedup (e.g., 'CWE-22' from 'CWE-22: Path Traversal...')."""
+        if not cwe_id:
+            return ""
+        match = re.search(r'CWE-\d+', cwe_id, re.IGNORECASE)
+        return match.group(0).upper() if match else cwe_id.strip().upper()
+
     def _deduplicate(self, findings: list) -> list:
-        """Remove duplicate findings using multiple matching strategies."""
+        """Remove duplicate findings using multiple matching strategies.
+        
+        Dedup keys (any match = duplicate):
+        1. Exact: title + file + line_number
+        2. CVE-based: CVE-ID + file
+        3. CWE+file: CWE-22 + upload/route.ts (catches same-vuln-type same-file from different sources)
+        4. Desc-prefix: title + file + desc[:100]
+        
+        When duplicates are found, keep the one with higher confidence or better remediation.
+        """
         seen = {}
         unique = []
 
         for f in findings:
             rel_path = self._get_relative_path(f.file_path)
+            norm_file = self._normalize_file_path(f.file_path)
 
             # Extract CVE ID from title if present
             cve_match = re.search(r'(CVE-\d{4}-\d+)', f.title)
             cve_id = cve_match.group(1) if cve_match else None
 
+            # Extract normalized CWE number
+            cwe_num = self._extract_cwe_number(f.cwe_id)
+
             keys = set()
+            # Key 1: Exact match
             keys.add(f"{f.title}|{rel_path}|{f.line_number}")
+            # Key 2: CVE-based (same CVE, same file)
             if cve_id:
                 keys.add(f"{cve_id}|{rel_path}")
+            # Key 3: CWE + normalized file — THIS catches cross-source duplicates
+            # e.g., semgrep's "Path Join Resolve Traversal" and agent's "Path Traversal in Upload"
+            # both have CWE-22 and point to the same file
+            if cwe_num and norm_file:
+                keys.add(f"{cwe_num}|{norm_file}")
+            # Key 4: Description-prefix match
             desc_prefix = f.description[:100].strip()
             keys.add(f"{f.title}|{rel_path}|{desc_prefix}")
 
@@ -272,11 +423,16 @@ class ReportGenerator:
             for key in keys:
                 if key in seen:
                     existing = seen[key]
+                    # Replace if new finding has better quality
                     if (f.confidence > existing.confidence or
                             (f.remediation and not existing.remediation) or
-                            (f.remediation_code and not existing.remediation_code)):
-                        idx = unique.index(existing)
-                        unique[idx] = f
+                            (f.remediation_code and not existing.remediation_code) or
+                            (f.severity.score > existing.severity.score)):
+                        try:
+                            idx = unique.index(existing)
+                            unique[idx] = f
+                        except ValueError:
+                            pass
                         for k in keys:
                             seen[k] = f
                     is_duplicate = True
@@ -369,26 +525,82 @@ class ReportGenerator:
         cleaned = re.sub(r'```\w*\s*\n?', '', text)
         # Remove trailing ``` closers
         cleaned = cleaned.rstrip('`').strip()
-        # Remove LLM commentary lines (common patterns)
+        
+        # Phase 1: Remove known LLM commentary patterns
         commentary_patterns = [
             r'^Most automated findings.*$',
             r'^The main security concern.*$',
-            r'^Overall,.*$',
-            r'^The codebase (?:contains|demonstrates|shows).*$',
+            r'^Overall[,.].*$',
+            r'^The codebase (?:contains|demonstrates|shows|exhibits|generally).*$',
             r'^Some parameters.*$',
             r'^Minor issues.*$',
-            r'^The code (?:appears|relies|does not).*$',
+            r'^The code (?:appears|relies|does not|constructs|processes).*$',
+            r'^The most critical (?:issue|issues|vulnerability).*$',
+            r'^Additional concerns.*$',
+            r'^The JWT-based.*$',
+            r'^External API calls.*$',
+            r'^Sanitize all.*$',
+            r'^The primary concern.*$',
+            r'^MEDIUM[,.].*$',
+            r'^Always sanitize.*$',
+            r'^Prefer server-generated.*$',
+            r'^Use cryptographic.*$',
+            r'^Avoid concatenating.*$',
+            r'^While the code performs.*$',
+            r'^Stripe API calls.*$',
+            r'^Twilio SMS.*$',
+            r'^This (?:OTP|vulnerability|issue|finding).*$',
+            r'^These issues.*$',
+            r'^Implement strict.*$',
+            r'^Potential directory traversal.*$',
+            r'^Insufficient validation.*$',
+            r'^Lack of strict.*$',
+            r'^Missing rate limiting.*$',
+            r'^Embedding user data.*$',
+            r'^Admin routes lack.*$',
+            r'^Some endpoints.*$',
+            r'^URL parameters.*$',
+            r'^Sensitive data embedded.*$',
         ]
+        
+        # Phase 2: Prose detection — remove lines that are clearly English prose, not code
+        # Code lines typically have: =, {, }, (, ), ;, //, /*, #, :, ->, =>, import, const, var, let, def, class, function, if, for, return, etc.
+        code_indicators = re.compile(
+            r'[{};=<>!&|]|^\s*(?:import|from|const|var|let|def|class|function|if|else|for|while|return|export|try|catch|throw|async|await|new|typeof|instanceof|switch|case|break|continue|do|in|of|//|/\*|\*|#|@|->|=>|\$\{|npm |pip )\b',
+            re.IGNORECASE
+        )
+        
         lines = cleaned.split('\n')
         filtered = []
         for line in lines:
+            stripped = line.strip()
+            # Skip markdown horizontal rules in code
+            if stripped in ('---', '***', '___', ''):
+                continue
+            
+            # Phase 1: Known pattern removal
             is_commentary = False
             for pattern in commentary_patterns:
-                if re.match(pattern, line.strip(), re.IGNORECASE):
+                if re.match(pattern, stripped, re.IGNORECASE):
                     is_commentary = True
                     break
-            if not is_commentary:
-                filtered.append(line)
+            if is_commentary:
+                continue
+            
+            # Phase 2: Prose detection heuristic
+            # If line has NO code indicators and reads like a sentence (>40 chars, starts with capital, has spaces)
+            if len(stripped) > 40 and not code_indicators.search(stripped):
+                # Count words — prose has many words
+                words = stripped.split()
+                if len(words) >= 6:
+                    # Looks like prose, not code — skip it
+                    continue
+            
+            filtered.append(line)
+        
+        # Remove trailing empty lines
+        while filtered and not filtered[-1].strip():
+            filtered.pop()
         return '\n'.join(filtered).strip()
 
     def _detect_language(self) -> str:
@@ -527,6 +739,44 @@ class ReportGenerator:
         if false_positives:
             md.append(f"| False Positives Filtered | {len(false_positives)} |")
         md.append("")
+
+        # Executive Summary
+        md.append("## 📋 Executive Summary")
+        md.append("")
+        if confirmed:
+            critical_count = counts.get(Severity.CRITICAL, 0)
+            high_count = counts.get(Severity.HIGH, 0)
+            medium_count = counts.get(Severity.MEDIUM, 0)
+            total = len(confirmed)
+
+            # Generate risk assessment
+            if critical_count > 0:
+                risk_level = "**HIGH RISK** — Critical vulnerabilities require immediate attention before deployment."
+            elif high_count > 0:
+                risk_level = "**MODERATE RISK** — High severity findings should be addressed before production deployment."
+            elif medium_count > 0:
+                risk_level = "**LOW-MODERATE RISK** — Medium severity findings should be reviewed and planned for remediation."
+            else:
+                risk_level = "**LOW RISK** — Only low/informational findings detected."
+
+            md.append(f"This scan identified **{total} confirmed vulnerabilities** "
+                      f"({critical_count} critical, {high_count} high, {medium_count} medium). "
+                      f"Risk assessment: {risk_level}")
+            md.append("")
+
+            # Highlight top critical issues
+            critical_findings = [f for f in confirmed if f.severity == Severity.CRITICAL]
+            high_findings = [f for f in confirmed if f.severity == Severity.HIGH]
+            top_issues = critical_findings + high_findings
+            if top_issues:
+                md.append("**Priority fixes:**")
+                for i, f in enumerate(top_issues[:5], 1):
+                    md.append(f"{i}. {f.severity.emoji} **{f.title}** — `{self._get_relative_path(f.file_path)}`")
+                md.append("")
+        else:
+            md.append("No confirmed vulnerabilities were detected in this scan. "
+                      "The application appears to follow security best practices.")
+            md.append("")
 
         # Findings by severity
         severity_order = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]

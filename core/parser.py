@@ -24,10 +24,11 @@ class CodeParser:
                     code_files.append(Path(root) / file)
         return code_files
 
-    def extract_context(self, max_chars: int = 100000) -> str:
+    def extract_context(self, max_chars: int = 200000) -> str:
         """
         Extract code context from the target directory.
         Respects max_chars to avoid overloading LLM context windows.
+        Prioritizes security-relevant files (routes, auth, middleware, config).
         """
         if not self.target_dir.exists() or not self.target_dir.is_dir():
             print(f"[-] Invalid target directory: {self.target_dir}")
@@ -37,18 +38,28 @@ class CodeParser:
         context_blocks = []
         total_chars = 0
 
-        # Sort files: entry points first, then by size (smaller first)
+        # Sort files: entry points first, then security-relevant files, then by size
         priority_names = {"main.py", "app.py", "index.js", "server.js", "main.go",
                           "app.rb", "index.ts", "main.java"}
 
+        # Security-relevant patterns to prioritize
+        security_patterns = {
+            "route", "auth", "login", "middleware", "password", "upload",
+            "admin", "api", "config", "webhook", "payment", "token",
+            "session", "otp", "verify", "reset", "signup", "register",
+        }
+
         def sort_key(f):
-            name = f.name
-            is_priority = 0 if name in priority_names else 1
+            name = f.name.lower()
+            path_str = str(f).lower()
+            is_priority = 0 if f.name in priority_names else 1
+            # Security-relevant files get priority 1, others get 2
+            is_security = 1 if any(p in path_str for p in security_patterns) else 2
             try:
                 size = f.stat().st_size
             except OSError:
                 size = 0
-            return (is_priority, size)
+            return (is_priority, is_security, size)
 
         files.sort(key=sort_key)
 
