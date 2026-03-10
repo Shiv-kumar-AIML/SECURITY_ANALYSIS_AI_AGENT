@@ -70,55 +70,55 @@ Traditional scanners like Checkmarx, SonarQube, or standard Semgrep produce **th
 The agent auto-detects installed tools and begins parsing the codebase:
 
 <div align="center">
-  <img src="./assets/scan_cli.png" alt="Scan Configuration" width="800" />
+  <img src="./assets/Pasted image.png" alt="Scan Configuration & Tool Status" width="800" />
 </div>
 
-### Phase 1: Reconnaissance & External Tools
+### Phase 1: Reconnaissance & Phase 2: Deep Analysis
 
-Runs industry-standard tools (Semgrep, Trivy, npm audit, Bandit) plus the built-in deterministic pattern scanner:
-
-<div align="center">
-  <img src="./assets/phase_1.png" alt="Phase 1 Reconnaissance" width="800" />
-</div>
-
-### Phase 2: Deep Vulnerability Analysis (AI Reasoning)
-
-12+ specialized methodology engines analyze the codebase for complex vulnerabilities:
+Runs industry-standard tools (Semgrep, Trivy, npm audit, Bandit, Pattern Scanner) and then 12+ AI methodology engines for deep vulnerability analysis:
 
 <div align="center">
-  <img src="./assets/phase_2.png" alt="Phase 2 Deep Analysis" width="800" />
+  <img src="./assets/Pasted image (2).png" alt="Phase 1 Reconnaissance & Phase 2 Deep Analysis" width="800" />
 </div>
 
 ### Phase 3-5: Remediation, Verification & Validation
 
-Context-aware fixes, false positive filtering, and final quality assurance:
+Context-aware fixes generation, false positive filtering with 5 verification engines, and final report validation with batch quality assurance:
 
 <div align="center">
-  <img src="./assets/phase_3.png" alt="Phase 3-5 Verification" width="800" />
+  <img src="./assets/Pasted image (3).png" alt="Phase 3-5 Remediation, Verification & Validation" width="800" />
 </div>
 
 ### Scan Results Summary
 
-Color-coded severity dashboard with risk score:
+Color-coded severity dashboard with risk score and scan statistics:
 
 <div align="center">
-  <img src="./assets/scan_results_sample.png" alt="Scan Results Summary" width="700" />
+  <img src="./assets/Pasted image (4).png" alt="Scan Results Summary & Statistics" width="800" />
 </div>
 
-### Sample Report Output
+### Top Findings Preview & Generated Reports
 
-Professional Markdown report with vulnerability details, code snippets, and remediations:
+Top critical findings preview with CWE references and confidence scores, plus auto-generated Markdown, JSON, and SARIF reports:
 
 <div align="center">
-  <img src="./assets/sample_report_preview.png" alt="Sample Security Report" width="700" />
+  <img src="./assets/Pasted image (5).png" alt="Top Findings Preview & Reports Generated" width="800" />
 </div>
 
-### Generated Reports
+### Sample Report — Summary View
 
-Automatic output in Markdown, JSON, and SARIF formats:
+Professional Markdown report with severity breakdown and executive summary:
 
 <div align="center">
-  <img src="./assets/reports.png" alt="Generated Reports" width="800" />
+  <img src="./assets/Pasted image (6).png" alt="Sample Report Summary" width="800" />
+</div>
+
+### Sample Report — Vulnerability Detail
+
+Detailed finding with vulnerable code, evidence, CWE tags, and remediation code:
+
+<div align="center">
+  <img src="./assets/Pasted image (7).png" alt="Sample Report Vulnerability Detail" width="800" />
 </div>
 
 ---
