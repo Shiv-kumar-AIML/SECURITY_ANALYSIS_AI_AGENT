@@ -1,0 +1,216 @@
+================================================================================
+   🛡️  PENTAS-AGENT — USAGE GUIDE & ALL COMMANDS
+   Security Analysis Agent v2.0
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ HELP COMMAND — See All Available Options
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  python main.py --help
+
+  This shows all available flags and options.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 1. SCAN A LOCAL PROJECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # With OpenAI
+  python main.py /path/to/your/project --openai-key sk-xxxx --model gpt-4.1-mini
+
+  # With Gemini
+  python main.py /path/to/your/project --gemini-key AIzaSy-xxxx --model gemini-2.0-flash
+
+  # With Local Ollama (free, no API key needed)
+  python main.py /path/to/your/project --model qwen2.5-coder:latest
+
+  Examples:
+  python main.py ~/projects/my-webapp --openai-key sk-xxxx --model gpt-4.1-nano
+  python main.py ./my-flask-app --gemini-key AIzaSy-xxxx --model gemini-2.5-pro
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 2. SCAN A PUBLIC GITHUB REPOSITORY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  python main.py https://github.com/username/repo.git \
+    --openai-key sk-xxxx \
+    --model gpt-4.1-mini
+
+  The repo will be auto-cloned to: cloned_repos/repo/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 3. SCAN A PRIVATE GITHUB REPOSITORY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Use a GitHub Personal Access Token (PAT) in the URL:
+
+  python main.py https://ghp_YourTokenHere@github.com/org/private-repo.git \
+    --openai-key sk-xxxx \
+    --model gpt-4.1-nano
+
+  How to get a PAT:
+    1. Go to GitHub → Settings → Developer Settings → Personal Access Tokens
+    2. Generate a token with "repo" scope
+    3. Use it in the URL as shown above
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 4. SCAN A SPECIFIC BRANCH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Clone the branch first, then scan locally:
+
+  # Step 1: Clone specific branch
+  git clone -b develop --single-branch https://github.com/org/repo.git cloned_repos/repo-develop
+
+  # Step 2: Scan it
+  python main.py cloned_repos/repo-develop --openai-key sk-xxxx --model gpt-4.1-mini
+
+  For private repo branch:
+  git clone -b feature-branch --single-branch https://ghp_TOKEN@github.com/org/repo.git cloned_repos/repo-feature
+  python main.py cloned_repos/repo-feature --openai-key sk-xxxx --model gpt-4.1-nano
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 5. TOOLS-ONLY SCAN (No LLM — Fast & Free)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Run ONLY the external scanners (Semgrep, Trivy, Bandit, npm audit) 
+  without LLM analysis. No API key needed:
+
+  python main.py /path/to/project --tools-only
+
+  This is useful for:
+  - Quick initial scan
+  - Saving API credits
+  - CI/CD pipeline integration
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 6. CHOOSE OUTPUT FORMAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Generate ALL formats (default): Markdown + JSON + SARIF
+  python main.py /path/to/project --openai-key sk-xxxx --output-format all
+
+  # Markdown only (human readable)
+  python main.py /path/to/project --openai-key sk-xxxx --output-format markdown
+
+  # JSON only (machine readable / API integration)
+  python main.py /path/to/project --openai-key sk-xxxx --output-format json
+
+  # SARIF only (GitHub Advanced Security / GitLab CI)
+  python main.py /path/to/project --openai-key sk-xxxx --output-format sarif
+
+  Reports are saved to: reports/security_report_YYYYMMDD-HHMMSS.*
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 7. CHOOSE LLM PROVIDER & MODEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ┌──────────────┬────────────────────┬─────────────────────────────────────┐
+  │ Provider     │ Flag               │ Example Models                      │
+  ├──────────────┼────────────────────┼─────────────────────────────────────┤
+  │ OpenAI       │ --openai-key       │ gpt-4.1-mini, gpt-4.1-nano, gpt-4o │
+  │ Gemini       │ --gemini-key       │ gemini-2.0-flash, gemini-2.5-pro   │
+  │ Ollama       │ (no flag needed)   │ qwen2.5-coder, llama3, codellama   │
+  │ Custom       │ --openai-base-url  │ Any OpenAI-compatible API          │
+  └──────────────┴────────────────────┴─────────────────────────────────────┘
+
+  OpenAI examples:
+  python main.py ./project --openai-key sk-xxxx --model gpt-4.1-mini
+  python main.py ./project --openai-key sk-xxxx --model gpt-4.1-nano
+  python main.py ./project --openai-key sk-xxxx --model gpt-4o
+
+  Gemini examples:
+  python main.py ./project --gemini-key AIzaSy-xxxx --model gemini-2.0-flash
+  python main.py ./project --gemini-key AIzaSy-xxxx --model gemini-2.5-pro
+
+  Ollama examples (local, free):
+  python main.py ./project --model qwen2.5-coder:latest
+  python main.py ./project --model llama3:latest
+  python main.py ./project --model codellama:latest
+
+  Custom OpenAI-compatible API:
+  python main.py ./project --openai-key your-key --openai-base-url http://localhost:8080/v1
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 8. USING ENVIRONMENT VARIABLES (No Flags Needed)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Set these environment variables so you don't need to pass keys every time:
+
+  export OPENAI_API_KEY=sk-xxxx
+  export GEMINI_API_KEY=AIzaSy-xxxx
+  export OPENAI_BASE_URL=http://localhost:8080/v1   # optional
+
+  Then simply run:
+  python main.py /path/to/project --model gpt-4.1-mini
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 9. SCAN YOURSELF (Scan This Tool)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Scan this very project for vulnerabilities:
+
+  python main.py . --openai-key sk-xxxx --model gpt-4.1-nano
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 10. RE-SCAN (Force Fresh Clone)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  If a repo was previously cloned, the scan reuses it.
+  To force a fresh clone:
+
+  # Delete the cached clone
+  rm -rf cloned_repos/repo-name
+
+  # Re-run the scan
+  python main.py https://github.com/org/repo.git --openai-key sk-xxxx
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ALL FLAGS REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ┌─────────────────────┬────────────────────────────────────────────────────┐
+  │ Argument            │ Description                                        │
+  ├─────────────────────┼────────────────────────────────────────────────────┤
+  │ target              │ Path to local project OR Git URL (required)        │
+  │ --model             │ LLM model name (default: qwen2.5-coder:latest)    │
+  │ --openai-key        │ OpenAI API key                                     │
+  │ --gemini-key        │ Google Gemini API key                              │
+  │ --openai-base-url   │ Custom OpenAI-compatible endpoint URL              │
+  │ --tools-only        │ Skip LLM, run only Semgrep/Trivy/Bandit/npm       │
+  │ --output-format     │ markdown | json | sarif | all (default: all)       │
+  │ --help / -h         │ Show help message and exit                         │
+  └─────────────────────┴────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ QUICK START EXAMPLES (Copy & Paste Ready)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # 1. Fastest scan (tools only, no LLM, free)
+  python main.py /path/to/project --tools-only
+
+  # 2. Cheapest LLM scan
+  python main.py /path/to/project --openai-key sk-xxxx --model gpt-4.1-nano
+
+  # 3. Best accuracy scan
+  python main.py /path/to/project --openai-key sk-xxxx --model gpt-4.1-mini
+
+  # 4. Free local LLM scan
+  python main.py /path/to/project --model qwen2.5-coder:latest
+
+  # 5. Private repo scan
+  python main.py https://ghp_TOKEN@github.com/org/repo.git --openai-key sk-xxxx
+
+  # 6. Branch scan
+  git clone -b develop https://github.com/org/repo.git cloned_repos/repo
+  python main.py cloned_repos/repo --openai-key sk-xxxx --model gpt-4.1-mini
+
+  # 7. JSON-only output for CI/CD
+  python main.py /path/to/project --openai-key sk-xxxx --output-format json
+
+  # 8. SARIF for GitHub Advanced Security
+  python main.py /path/to/project --openai-key sk-xxxx --output-format sarif
+
+================================================================================
+  Pentas-Agent v2.0 — Built for Precision. Designed for Production. 🛡️
+================================================================================
