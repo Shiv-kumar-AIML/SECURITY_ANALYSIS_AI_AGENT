@@ -1,6 +1,7 @@
 """
 Enhanced Code Parser.
 Extracts code context from the target directory with improved filtering and metadata.
+Supports both full-context mode (legacy) and smart-context mode (vectorless pipeline).
 """
 import os
 from pathlib import Path
@@ -10,6 +11,9 @@ from .constants import SUPPORTED_EXTENSIONS, SKIP_DIRECTORIES
 class CodeParser:
     def __init__(self, target_dir):
         self.target_dir = Path(target_dir).resolve()
+        # Pre-analysis results (populated by extract_smart_context)
+        self.pre_analysis = None
+        self.context_stats = None
 
     def get_all_files(self):
         """Walk the directory and collect all supported source files."""
@@ -108,3 +112,83 @@ class CodeParser:
             "total_lines": total_lines,
             "by_extension": by_extension,
         }
+
+    def extract_smart_context(self, scanner_files: list = None,
+                              max_chars: int = 200000) -> dict:
+        """
+        Extract optimized code context using the vectorless pre-analysis pipeline.
+        Falls back to extract_context() if tree-sitter is unavailable or fails.
+
+        Pipeline: AST Parse → Symbol Table → Call Graph → Smart Context Builder
+
+        Returns:
+            dict with 'context' (str), 'metadata' (dict), 'stats' (dict)
+        """
+        try:
+            from .analysis.ast_parser import TreeSitterParser
+            from .analysis.symbol_table import SymbolTable
+            from .analysis.call_graph import CallGraph
+            from .analysis.context_builder import SmartContextBuilder
+
+            parser = TreeSitterParser()
+
+            if not parser.available:
+                # tree-sitter not installed — fall back to legacy
+                return self._fallback_context(max_chars, reason="tree-sitter not installed")
+
+            # Step 1: Parse repository AST
+            ast_data = parser.parse_repository(str(self.target_dir))
+
+            if not ast_data["files"]:
+                return self._fallback_context(max_chars, reason="no parseable files found")
+
+            # Step 2: Build symbol table
+            symbol_table = SymbolTable()
+            symbol_table.build_from_ast(ast_data)
+
+            # Step 3: Build call graph
+            call_graph = CallGraph(symbol_table)
+
+            # Step 4: Build smart context
+            full_context = self.extract_context(max_chars)
+            context_builder = SmartContextBuilder(symbol_table, call_graph)
+            result = context_builder.build_context(
+                full_context=full_context,
+                scanner_files=scanner_files or [],
+            )
+
+            # Store for later use by coordinator
+            self.pre_analysis = {
+                "symbol_table": symbol_table,
+                "call_graph": call_graph,
+                "context_builder": context_builder,
+                "ast_data": ast_data,
+            }
+            self.context_stats = result["stats"]
+
+            return result
+
+        except Exception as e:
+            return self._fallback_context(max_chars, reason=f"pre-analysis error: {e}")
+
+    def _fallback_context(self, max_chars: int, reason: str = "") -> dict:
+        """Fall back to legacy full-context extraction."""
+        full_context = self.extract_context(max_chars)
+        return {
+            "context": full_context,
+            "metadata": {
+                "functions_selected": 0,
+                "functions_total": 0,
+                "files_included": ["ALL (fallback)"],
+                "sink_chains_found": 0,
+                "dangerous_chains": 0,
+                "used_fallback": True,
+                "fallback_reason": reason,
+            },
+            "stats": {
+                "original_chars": len(full_context),
+                "filtered_chars": len(full_context),
+                "reduction_percent": 0,
+            },
+        }
+

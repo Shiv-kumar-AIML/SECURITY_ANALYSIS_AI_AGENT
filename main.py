@@ -224,6 +224,9 @@ def main():
     parser.add_argument("--tools-only",
                         action="store_true",
                         help="Run only external tools (no LLM analysis)")
+    parser.add_argument("--full-context",
+                        action="store_true",
+                        help="Disable smart context (send all code to LLM, legacy behavior)")
     parser.add_argument("--output-format",
                         choices=["markdown", "json", "sarif", "all"],
                         default="all",
@@ -268,7 +271,40 @@ def main():
         print("\n[*] Parsing target codebase...")
 
     code_parser = CodeParser(target_path)
-    target_code = code_parser.extract_context()
+
+    # Smart Context (default) vs Full Context (legacy)
+    if args.full_context:
+        target_code = code_parser.extract_context()
+        if console:
+            console.print(f"  [yellow]⚠[/yellow] Full context mode (legacy): [bold]{len(target_code)}[/bold] chars")
+        else:
+            print(f"[*] Full context mode: {len(target_code)} characters.")
+    else:
+        if console:
+            console.print("  [cyan]▸[/cyan] Running pre-analysis pipeline (AST → Symbol Table → Call Graph)...")
+        else:
+            print("[*] Running pre-analysis pipeline...")
+
+        smart_result = code_parser.extract_smart_context()
+        target_code = smart_result["context"]
+        meta = smart_result["metadata"]
+        stats = smart_result["stats"]
+
+        if console:
+            if meta.get("used_fallback"):
+                reason = meta.get("fallback_reason", "unknown")
+                console.print(f"  [yellow]⚠[/yellow] Fallback to full context: {reason}")
+                console.print(f"  [green]✓[/green] Context: [bold]{len(target_code)}[/bold] chars")
+            else:
+                console.print(f"  [green]✓[/green] Functions analyzed: [bold]{meta['functions_total']}[/bold]")
+                console.print(f"  [green]✓[/green] Security-relevant selected: [bold]{meta['functions_selected']}[/bold]")
+                console.print(f"  [green]✓[/green] Sink chains found: [bold]{meta['sink_chains_found']}[/bold] ({meta['dangerous_chains']} dangerous)")
+                console.print(f"  [green]✓[/green] Context: [bold]{stats['filtered_chars']:,}[/bold] / {stats['original_chars']:,} chars [bold bright_green]({stats['reduction_percent']}% reduction)[/bold bright_green]")
+        else:
+            if meta.get("used_fallback"):
+                print(f"[*] Fallback to full context: {meta.get('fallback_reason', '')}")
+            else:
+                print(f"[+] Smart context: {stats['filtered_chars']} / {stats['original_chars']} chars ({stats['reduction_percent']}% reduction)")
 
     if not target_code and not args.tools_only:
         msg = "No supported source files found. Exiting."
@@ -279,9 +315,7 @@ def main():
         sys.exit(1)
 
     if console:
-        console.print(f"  [green]✓[/green] Extracted [bold]{len(target_code)}[/bold] characters of code context\n")
-    else:
-        print(f"[+] Extracted codebase context: {len(target_code)} characters.")
+        console.print()
 
     # Run Scan
     try:
