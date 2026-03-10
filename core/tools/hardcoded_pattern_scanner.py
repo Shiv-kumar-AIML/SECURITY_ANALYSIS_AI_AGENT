@@ -110,8 +110,9 @@ PATTERNS = [
         "severity": Severity.MEDIUM,
         "cwe_id": "CWE-521: Weak Password Requirements",
         "owasp": "A07:2021 - Identification and Authentication Failures",
-        "regex": r"""(?:password|newPassword|new_password)(?:\.length|\.len\b)\s*(?:<|<=|>|>=)\s*\d+""",
-        "file_patterns": ["*.ts", "*.js", "*.tsx", "*.jsx", "*.py"],
+        # Only match password/newPassword — NOT confirmPassword (that's form UI validation)
+        "regex": r"""(?<!confirm)(?:password|newPassword|new_password)(?:\.length|\.len\b)\s*(?:<|<=|>|>=)\s*\d+""",
+        "file_patterns": ["*.ts", "*.js", "*.py"],  # Exclude .tsx/.jsx — those are React UI components
         "context_keywords": ["password", "reset", "change", "register", "signup"],
     },
     {
@@ -231,8 +232,13 @@ class HardcodedPatternScanner(BaseTool):
         seen = set()  # Dedup by pattern_id + file
         
         for item in raw_results.get("findings", []):
-            # Dedup: only one finding per pattern per file
-            dedup_key = f"{item['pattern_id']}|{os.path.basename(item['file'])}"
+            # Dedup: only one finding per pattern per UNIQUE file path (not basename)
+            # Using relative path to avoid merging send-otp/route.ts with verify-otp/route.ts
+            rel_path = os.path.relpath(item['file'], os.path.commonpath([item['file']])) if item['file'] else item['file']
+            # Use last 3 path components for dedup (e.g., 'client/auth/send-otp/route.ts')
+            path_parts = item['file'].replace('\\', '/').split('/')
+            dedup_path = '/'.join(path_parts[-4:]) if len(path_parts) >= 4 else '/'.join(path_parts)
+            dedup_key = f"{item['pattern_id']}|{dedup_path}"
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)

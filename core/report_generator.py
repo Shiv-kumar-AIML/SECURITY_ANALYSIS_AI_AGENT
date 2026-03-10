@@ -410,11 +410,13 @@ class ReportGenerator:
             # Key 2: CVE-based (same CVE, same file)
             if cve_id:
                 keys.add(f"{cve_id}|{rel_path}")
-            # Key 3: CWE + normalized file — THIS catches cross-source duplicates
+            # Key 3: CWE + FULL relative path — THIS catches cross-source duplicates
             # e.g., semgrep's "Path Join Resolve Traversal" and agent's "Path Traversal in Upload"
             # both have CWE-22 and point to the same file
-            if cwe_num and norm_file:
-                keys.add(f"{cwe_num}|{norm_file}")
+            # IMPORTANT: Use FULL rel_path, not norm_file, to avoid merging different files
+            # e.g., send-otp/route.ts and verify-otp/route.ts are DIFFERENT files
+            if cwe_num and rel_path:
+                keys.add(f"{cwe_num}|{rel_path}")
             # Key 4: Description-prefix match
             desc_prefix = f.description[:100].strip()
             keys.add(f"{f.title}|{rel_path}|{desc_prefix}")

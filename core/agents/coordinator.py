@@ -8,6 +8,7 @@ from .recon_agent import ReconAgent
 from .vulnerability_agent import VulnerabilityAgent
 from .remediation_agent import RemediationAgent
 from .verifier_agent import VerifierAgent
+from .report_validator_agent import ReportValidatorAgent
 from ..llm_provider import LLMProvider
 from ..findings import ScanResult
 from ..constants import SKILLS_DIR
@@ -32,15 +33,17 @@ class CoordinatorAgent(BaseAgent):
         self.vuln_analyst = VulnerabilityAgent(llm, self.shared_memory, self.skills_dir)
         self.remediator = RemediationAgent(llm, self.shared_memory, self.skills_dir)
         self.verifier = VerifierAgent(llm, self.shared_memory, self.skills_dir)
+        self.validator = ReportValidatorAgent(llm, self.shared_memory, self.skills_dir)
 
     def execute_full_scan(self, code_context: str, console=None):
         """
-        Execute the full 5-phase multi-agent scan pipeline:
+        Execute the full 6-phase multi-agent scan pipeline:
         Phase 1: Reconnaissance (tech stack + tools + code mapping)
         Phase 2: Deep Vulnerability Analysis (skills + reasoning)
         Phase 3: Correlation (merge all findings)
         Phase 4: Remediation (generate fixes)
         Phase 5: Verification (false positive filtering)
+        Phase 6: Report Validation (final quality gate)
         """
         self.think("Initializing multi-agent security scan pipeline...")
 
@@ -94,6 +97,24 @@ class CoordinatorAgent(BaseAgent):
             console.print(f"\n  [green]✓[/green] Confirmed: [bold]{verify_results.get('confirmed_count', 0)}[/bold]")
             console.print(f"  [green]✓[/green] False Positives Eliminated: [bold]{verify_results.get('false_positive_count', 0)}[/bold]\n")
 
+        # ═══════════════════════════════════════════
+        # PHASE 5: REPORT VALIDATION (Final Quality Gate)
+        # ═══════════════════════════════════════════
+        if console:
+            console.rule("[bold bright_white]Phase 5: Report Validation & Quality Assurance[/bold bright_white]")
+
+        validation_results = self.validator.execute(self.scan_result, code_context, console=console)
+
+        if console:
+            console.print(f"\n  [green]✓[/green] Validated: [bold]{validation_results.get('validated_count', 0)}[/bold]")
+            removed = validation_results.get('removed_count', 0)
+            fixed = validation_results.get('fixed_count', 0)
+            if removed > 0:
+                console.print(f"  [yellow]✗[/yellow] Removed (duplicates/FP): [bold]{removed}[/bold]")
+            if fixed > 0:
+                console.print(f"  [cyan]✎[/cyan] Fixed (remediation/severity): [bold]{fixed}[/bold]")
+            console.print()
+
         # Finalize
         self.scan_result.scan_end = time.time()
 
@@ -103,6 +124,7 @@ class CoordinatorAgent(BaseAgent):
             "vulnerability": self.vuln_analyst.get_reasoning_log(),
             "remediation": self.remediator.get_reasoning_log(),
             "verifier": self.verifier.get_reasoning_log(),
+            "validator": self.validator.get_reasoning_log(),
             "coordinator": self.get_reasoning_log(),
         }
 
