@@ -241,26 +241,43 @@ In addition to LLM-based analysis, a **deterministic regex scanner** ensures cri
 
 ### 1. Prerequisites
 - Python 3.10+
-- `semgrep`, `trivy`, and `npm` installed in your system PATH
 
 ### 2. Setup
+
 ```bash
 # Clone the repository
 git clone https://github.com/Shiv-kumar-AIML/SECURITY_ANALYSIS_AI_AGENT.git
 cd SECURITY_ANALYSIS_AI_AGENT
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Install all Python dependencies + scanners (semgrep, bandit auto-installed)
+pip install .
 ```
 
-### 3. Running Scans
+> **Note:** Running `pip install .` uses `pyproject.toml` and automatically installs **semgrep** and **bandit** along with all Python dependencies.
+
+### 3. Install External Scanners
+
+These system-level tools need separate installation:
+
+| Scanner | Ubuntu/Debian | Snap | macOS |
+|---------|--------------|------|-------|
+| **Trivy** | `sudo apt-get install -y trivy` | `sudo snap install trivy` | `brew install trivy` |
+| **Gitleaks** | [GitHub Releases](https://github.com/gitleaks/gitleaks/releases) | — | `brew install gitleaks` |
+| **Node.js** (npm audit) | `sudo apt-get install -y nodejs npm` | `sudo snap install node --classic` | `brew install node` |
+
+Or install Trivy via script:
+```bash
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+```
+
+### 4. Running Scans
 
 **Scan a Local Project:**
 ```bash
 python main.py /path/to/local/project --openai-key sk-xxxx --model gpt-4.1-mini
 ```
 
-**Scan a GitHub Repository (with authentication for private repos):**
+**Scan a GitHub Repository (private repos supported):**
 ```bash
 python main.py https://ghp_YourToken@github.com/org/private-repo.git \
   --openai-key sk-xxxx \
@@ -274,7 +291,7 @@ python main.py https://github.com/org/repo.git --branch develop \
   --model gpt-4.1-mini
 ```
 
-### 4. Supported LLM Providers
+### 5. Supported LLM Providers
 
 | Provider | Flag | Models |
 |----------|------|--------|

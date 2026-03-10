@@ -1,0 +1,157 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pentas-agent"
+version = "2.0.0"
+description = "Enterprise-Grade, Multi-Agent AI Security Vulnerability Detection Engine"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Shiv Kumar", email = "shivkumar@mindroots.dev"},
+]
+keywords = ["security", "sast", "sca", "vulnerability", "scanner", "ai", "llm", "pentest"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+
+dependencies = [
+    # Core LLM Providers
+    "google-generativeai>=0.8.0",
+    "openai>=1.40.0",
+
+    # CLI & Display
+    "rich>=13.7.0",
+
+    # Utilities
+    "pyyaml>=6.0",
+    "jinja2>=3.1.0",
+
+    # Data Processing
+    "dataclasses-json>=0.6.0",
+
+    # Security Scanners (Python-based — auto-installed)
+    "semgrep>=1.50.0",
+    "bandit>=1.7.0",
+]
+
+[project.optional-dependencies]
+# All external scanners that can be pip-installed
+full = [
+    "semgrep>=1.50.0",
+    "bandit>=1.7.0",
+]
+# Development tools
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=24.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+# CLI entry point — allows running as: pentas-agent /path/to/project
+pentas-agent = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/Shiv-kumar-AIML/SECURITY_ANALYSIS_AI_AGENT"
+Repository = "https://github.com/Shiv-kumar-AIML/SECURITY_ANALYSIS_AI_AGENT"
+Issues = "https://github.com/Shiv-kumar-AIML/SECURITY_ANALYSIS_AI_AGENT/issues"
+
+[tool.setuptools]
+packages = ["core", "core.agents", "core.tools"]
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.yaml", "*.yml", "*.json"]
+
+# ════════════════════════════════════════════════════════════════
+# External Scanner Configuration
+# These scanners are auto-installed by running: python setup_tools.py
+# ════════════════════════════════════════════════════════════════
+
+[tool.pentas.scanners]
+# Python-based scanners (installed via pip)
+[tool.pentas.scanners.semgrep]
+type = "pip"
+package = "semgrep"
+version = ">=1.50.0"
+description = "Pattern-based SAST scanner for 30+ languages"
+required = true
+
+[tool.pentas.scanners.bandit]
+type = "pip"
+package = "bandit"
+version = ">=1.7.0"
+description = "Python-specific security linter"
+required = true
+
+# System-level scanners (installed via package manager or binary download)
+[tool.pentas.scanners.trivy]
+type = "system"
+binary = "trivy"
+install_cmd_linux = "curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin"
+install_cmd_macos = "brew install trivy"
+install_cmd_apt = "sudo apt-get install -y trivy"
+install_cmd_snap = "sudo snap install trivy"
+description = "SCA, container & IaC vulnerability scanner"
+required = true
+
+[tool.pentas.scanners.gitleaks]
+type = "system"
+binary = "gitleaks"
+install_cmd_linux = "curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_8.22.1_linux_x64.tar.gz | tar xz -C /usr/local/bin gitleaks"
+install_cmd_macos = "brew install gitleaks"
+install_cmd_apt = "sudo apt-get install -y gitleaks"
+description = "Secret & credential detector for git repos"
+required = false
+
+[tool.pentas.scanners.npm]
+type = "system"
+binary = "npm"
+install_cmd_linux = "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+install_cmd_macos = "brew install node"
+description = "Node.js package manager (for npm audit)"
+required = true
+
+# ════════════════════════════════════════════════════════════════
+# Tool Configurations
+# ════════════════════════════════════════════════════════════════
+
+[tool.semgrep]
+# Default semgrep rules for security scanning
+rules = ["p/security-audit", "p/owasp-top-ten", "p/javascript", "p/typescript"]
+severity = ["ERROR", "WARNING"]
+timeout = 300
+
+[tool.bandit]
+# Bandit configuration
+severity = "low"
+confidence = "low"
+exclude = ["tests", "test_repo", ".venv"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
