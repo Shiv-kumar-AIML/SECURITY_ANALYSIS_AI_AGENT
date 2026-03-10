@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/Status-Production_Ready-success?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/Engine-LLM_Reasoning-purple?style=for-the-badge&logo=openai&logoColor=white" />
-  <img src="https://img.shields.io/badge/Accuracy-100%25_True_Positives-brightgreen?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Accuracy-High_Precision-brightgreen?style=for-the-badge" />
   <img src="https://img.shields.io/badge/License-Apache_2.0-red?style=for-the-badge&logoColor=white" />
   <img src="https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge&logoColor=white" />
   
@@ -15,7 +15,7 @@
     An intelligent SAST/SCA scanner that doesn't just pattern-match — it <strong>reasons</strong>. 
     By combining deterministic rule-based scanning with specialized AI methodology engines, Pentas-Agent 
     traces dataflows, verifies exploitability, and dynamically eliminates false positives with 
-    <strong>100% true positive accuracy</strong>.
+    <strong>industry-leading precision</strong>.
   </p>
 </div>
 
@@ -23,15 +23,16 @@
 
 ## 🎯 Accuracy & Benchmark Results
 
-Pentas-Agent has been rigorously tested and audited against real-world production codebases. Here are the verified results:
+Pentas-Agent has been rigorously tested and audited against real-world production codebases. Below are results from a benchmark scan on a Next.js/TypeScript production application (20,834 LOC, 107 files):
 
-| Metric | Score |
+| Metric | Benchmark Result |
 |--------|-------|
-| **True Positive Rate** | **100%** (28/28 findings confirmed real) |
-| **False Positive Rate** | **0%** (zero false positives in final report) |
-| **Known Vulnerability Detection** | **100%** (11/11 known critical vulns found) |
-| **Severity Classification Accuracy** | **100%** (all severities correctly assigned) |
-| **Remediation Tech-Stack Match** | **100%** (all remediations in correct language) |
+| **True Positive Rate** | **28/28** findings confirmed real (zero false positives) |
+| **Known Vulnerability Detection** | **11/11** known critical vulns detected |
+| **Severity Classification** | All severities correctly assigned |
+| **Remediation Tech-Stack Match** | All remediations in correct language (TypeScript) |
+
+> **Note:** These are benchmark results from a specific test case, not a universal guarantee. Like all SAST tools, results may vary across different codebases and tech stacks.
 
 ### What It Detects (Tested & Verified)
 
