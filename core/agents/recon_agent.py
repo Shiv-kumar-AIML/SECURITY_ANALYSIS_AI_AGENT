@@ -165,7 +165,18 @@ class ReconAgent(BaseAgent):
 
         # 1. Tech Stack Detection
         tech_stack = self._detect_tech_stack(scan_result.target_path)
-        scan_result.tech_stack = tech_stack.get("languages", [])
+        # Include both languages AND frameworks in tech_stack for display
+        languages = tech_stack.get("languages", [])
+        frameworks = tech_stack.get("frameworks", [])
+        # Capitalize framework names for display
+        framework_display = {
+            'django': 'Django', 'flask': 'Flask', 'fastapi': 'FastAPI',
+            'express': 'Express.js', 'nextjs': 'Next.js', 'react': 'React',
+            'angular': 'Angular', 'spring': 'Spring', 'rails': 'Rails',
+            'laravel': 'Laravel',
+        }
+        display_frameworks = [framework_display.get(fw, fw.title()) for fw in frameworks]
+        scan_result.tech_stack = languages + display_frameworks
         scan_result.files_scanned = tech_stack.get("total_files", 0)
         scan_result.total_lines = tech_stack.get("total_lines", 0)
         self.share_knowledge("tech_stack", tech_stack)

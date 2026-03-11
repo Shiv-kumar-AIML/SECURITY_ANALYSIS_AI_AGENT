@@ -341,8 +341,10 @@ Remember: Be CONSERVATIVE with REMOVE. Only remove clear false positives and exa
 
         self.think(f"Validating {len(confirmed)} confirmed findings for tech stack: {tech_stack}")
 
-        # Process in batches of 8 findings (to keep LLM context manageable)
-        batch_size = 8
+        # Process in batches of 25 findings (optimized for token cost)
+        # 8 per batch = 61 LLM calls for 481 findings (too many!)
+        # 25 per batch = 20 LLM calls for 481 findings (3x cheaper)
+        batch_size = 25
         all_validated = []
         total_removed = 0
         total_fixed = 0

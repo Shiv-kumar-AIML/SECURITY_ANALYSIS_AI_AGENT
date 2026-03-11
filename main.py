@@ -144,12 +144,17 @@ def print_scan_config(console, target_path, engine, model, tools_only=False):
 def print_results_summary(console, scan_result):
     """Print a beautiful results summary."""
     from core.findings import Severity
+    from core.report_generator import ReportGenerator
 
     confirmed = scan_result.get_confirmed()
     false_positives = [f for f in scan_result.findings if f.is_false_positive]
     scan_duration = scan_result.scan_end - scan_result.scan_start if scan_result.scan_end else 0
 
-    # Severity summary table
+    # Deduplicate to match report counts
+    report_gen = ReportGenerator(scan_result)
+    unique_confirmed = report_gen._deduplicate(confirmed)
+
+    # Severity summary table (using deduped counts = matches report)
     table = Table(
         title="📊 Findings Summary",
         box=box.HEAVY_EDGE,
@@ -160,9 +165,8 @@ def print_results_summary(console, scan_result):
     table.add_column("Count", justify="center")
     table.add_column("", min_width=20)
 
-    counts = scan_result.severity_counts
     for sev in Severity:
-        count = counts.get(sev.value, 0)
+        count = len([f for f in unique_confirmed if f.severity == sev])
         bar = "█" * min(count * 2, 30) or "—"
         table.add_row(
             f"{sev.emoji} {sev.value}",
@@ -175,8 +179,11 @@ def print_results_summary(console, scan_result):
 
     # Stats panel
     stats = Text()
-    stats.append("  Total Confirmed:  ", style="dim")
-    stats.append(f"{len(confirmed)}\n", style="bold bright_red" if len(confirmed) > 0 else "bold green")
+    stats.append("  Total Unique:     ", style="dim")
+    stats.append(f"{len(unique_confirmed)}\n", style="bold bright_red" if len(unique_confirmed) > 0 else "bold green")
+    if len(confirmed) != len(unique_confirmed):
+        stats.append("  Duplicates Merged:", style="dim")
+        stats.append(f" {len(confirmed) - len(unique_confirmed)}\n", style="bold")
     stats.append("  False Positives:  ", style="dim")
     stats.append(f"{len(false_positives)}\n", style="bold")
     stats.append("  Files Scanned:    ", style="dim")

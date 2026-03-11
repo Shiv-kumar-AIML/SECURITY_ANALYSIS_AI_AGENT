@@ -140,7 +140,26 @@ class BaseAgent:
         prompt = f"Target Codebase:\n<CODE>\n{code_context}\n</CODE>\n\n"
         if extra_context:
             prompt += f"Previous Knowledge & Context:\n<CONTEXT>\n{extra_context}\n</CONTEXT>\n\n"
-        prompt += "Execute your specific analysis skill on the target codebase. Think step-by-step. State your findings clearly with evidence."
+        prompt += """Execute your specific analysis skill on the target codebase. Think step-by-step.
+
+IMPORTANT: Pay special attention to the SECURITY-RELEVANT CONFIGURATION FILES section at the top of the code — check for hardcoded secrets, weak settings, missing security controls, and dangerous defaults.
+
+For EACH vulnerability you find, you MUST output it using EXACTLY this format:
+
+VULNERABILITY:
+- Title: [specific descriptive title]
+- Severity: [CRITICAL/HIGH/MEDIUM/LOW]
+- CWE: [CWE-xxx]
+- OWASP: [relevant category]
+- File: [exact file path from the code]
+- Line: [line number]
+- Description: [what is wrong and the security impact]
+- Code Evidence: [the vulnerable code/setting]
+- Remediation: [how to fix it]
+- Fixed Code: [corrected code]
+
+If you find NO vulnerabilities, say: "No vulnerabilities found for this skill."
+Do NOT use any other format. Do NOT use markdown headers or numbered lists for findings."""
 
         return self.llm.reason(prompt, system=skill_prompt)
 

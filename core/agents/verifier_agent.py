@@ -131,16 +131,26 @@ def _is_safe_framework_pattern(finding: Finding) -> bool:
     
     # Environment variables used for secrets = CORRECT practice, NOT hardcoded
     # BUT: do NOT filter if the finding is about a hardcoded auth bypass value
+    # AND: do NOT filter if there's a hardcoded fallback default value
+    # e.g., os.environ.get('PASSWORD', 'hardcoded') — the fallback IS the vuln
     if not is_auth_bypass and ('secret' in title or 'hardcoded' in title or 'cwe-798' in (finding.cwe_id or '').lower()):
-        env_patterns = [
-            'process.env', 'os.environ', 'os.getenv(', 'config(',
-            'from env', 'from @shared/config/env',
-            'environment variable', 'env var',
+        # Check for hardcoded default/fallback patterns — these are STILL vulnerable
+        fallback_indicators = [
+            ", '", ', "', "default=", "default ='", 'default ="',
+            "fallback", "or '", 'or "',
         ]
-        if any(pat in code or pat in desc for pat in env_patterns):
-            return True
-        if 'jwt' in title and ('env' in code or 'environment' in desc):
-            return True
+        has_hardcoded_fallback = any(pat in code for pat in fallback_indicators)
+
+        if not has_hardcoded_fallback:
+            env_patterns = [
+                'process.env', 'os.environ', 'os.getenv(', 'config(',
+                'from env', 'from @shared/config/env',
+                'environment variable', 'env var',
+            ]
+            if any(pat in code or pat in desc for pat in env_patterns):
+                return True
+            if 'jwt' in title and ('env' in code or 'environment' in desc):
+                return True
     
     # Config URLs from hardcoded constants are NOT SSRF
     if 'ssrf' in title or 'cwe-918' in (finding.cwe_id or '').lower():

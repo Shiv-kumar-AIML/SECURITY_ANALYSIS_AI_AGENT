@@ -86,15 +86,20 @@ if (!allowedOrigins.includes(origin)) {
     "hardcoded_secret": {
         "why": "Sensitive credentials (API keys, passwords, tokens) are hardcoded in the source code. Anyone with access to the repository can extract and misuse them.",
         "solution": "Move all secrets to environment variables or a secrets manager. Never commit secrets to git.",
-        "code": """// VULNERABLE:
-const API_KEY = 'sk-1234567890abcdef';
+        "code": """# VULNERABLE (Python/Django):
+API_KEY = 'sk-1234567890abcdef'
 
-// FIXED (use environment variables):
-const API_KEY = process.env.API_KEY;
-if (!API_KEY) throw new Error('API_KEY must be set');
+# FIXED (Python — use environment variables):
+import os
+API_KEY = os.environ.get('API_KEY')
+if not API_KEY:
+    raise ValueError('API_KEY environment variable must be set')
 
-// For Next.js, use .env.local (gitignored):
-// API_KEY=sk-your-key-here"""
+# VULNERABLE (JavaScript/Node.js):
+# const API_KEY = 'sk-1234567890abcdef';
+# FIXED (JavaScript):
+# const API_KEY = process.env.API_KEY;
+# if (!API_KEY) throw new Error('API_KEY must be set');"""
     },
     "unvalidated_password": {
         "why": "Password validation only checks length, allowing weak passwords (e.g., '12345678', 'password') that are vulnerable to brute-force and dictionary attacks.",
@@ -306,6 +311,97 @@ return render(request, 'greeting.html', {'name': user_name})"""
 <!-- FIXED: -->
 {% blocktranslate %}Welcome {{ username|force_escape }}{% endblocktranslate %}"""
     },
+    # ─── Django / Python framework-specific templates ───
+    "django_secret_key": {
+        "why": "Django SECRET_KEY is hardcoded with a weak/short value. This key is used for session signing, CSRF tokens, password reset tokens, and cryptographic signing. A guessable key allows session forgery and CSRF bypass.",
+        "solution": "Generate a strong random key and load it from environment variables. Never commit the real key to source control.",
+        "code": """# VULNERABLE:
+SECRET_KEY = 'megamart'
+SECRET_KEY = 'django-insecure-abc'
+
+# FIXED:
+import os
+SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
+
+# Generate a new key with:
+# python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())\""""
+    },
+    "django_csrf_exempt": {
+        "why": "@csrf_exempt disables Cross-Site Request Forgery protection on the decorated view. If used on state-changing endpoints (checkout, profile update, payment), attackers can trick users into performing unwanted actions.",
+        "solution": "Remove @csrf_exempt and use Django's built-in CSRF protection. For API endpoints, use Django REST Framework which has its own CSRF handling.",
+        "code": """# VULNERABLE:
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
+def checkout_view(request):
+    # Processes payment without CSRF check!
+    pass
+
+# FIXED (remove csrf_exempt, use DRF for APIs):
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+@api_view(['POST'])
+def checkout_view(request):
+    # DRF handles CSRF with token auth
+    return Response({'status': 'ok'})"""
+    },
+    "pickle_deserialization": {
+        "why": "Pickle deserialization can execute arbitrary code. If pickle is accepted as a content type in Celery or used to deserialize untrusted data, an attacker who can inject messages into the broker can achieve Remote Code Execution.",
+        "solution": "Remove 'pickle' from CELERY_ACCEPT_CONTENT. Use JSON serialization only for Celery tasks.",
+        "code": """# VULNERABLE:
+CELERY_ACCEPT_CONTENT = ['json', 'pickle']
+CELERY_TASK_SERIALIZER = 'pickle'
+
+# FIXED:
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'"""
+    },
+    "django_security_headers": {
+        "why": "Missing Django security middleware settings leave the application vulnerable to clickjacking, cookie theft over HTTP, SSL stripping, and other attacks.",
+        "solution": "Add all required security settings to your production settings file.",
+        "code": """# Add to production settings:
+SECURE_SSL_REDIRECT = True
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'"""
+    },
+    "django_allowed_hosts": {
+        "why": "ALLOWED_HOSTS = ['*'] accepts requests with any Host header. This enables HTTP Host header injection attacks, cache poisoning, and password reset hijacking.",
+        "solution": "Set ALLOWED_HOSTS to your actual domain names only.",
+        "code": """# VULNERABLE:
+ALLOWED_HOSTS = ['*']
+
+# FIXED:
+ALLOWED_HOSTS = [
+    'example.com',
+    'www.example.com',
+    'api.example.com',
+]
+# Or from environment:
+import os
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')"""
+    },
+    "hardcoded_password_settings": {
+        "why": "Passwords are hardcoded in settings files, either directly or as fallback defaults in os.environ.get(). Anyone with code access can extract these credentials.",
+        "solution": "Move all passwords to environment variables WITHOUT hardcoded fallback defaults. Use a crash-on-missing pattern.",
+        "code": """# VULNERABLE:
+PASSWORD = 'secret123'
+PASSWORD = os.environ.get('PASSWORD', 'fallback_password')  # fallback is the vuln!
+
+# FIXED (crash if missing — forces proper env setup):
+PASSWORD = os.environ['PASSWORD']
+# Or with a helpful error:
+PASSWORD = os.environ.get('PASSWORD')
+if not PASSWORD:
+    raise ValueError('PASSWORD environment variable must be set')"""
+    },
 }
 
 
@@ -315,10 +411,18 @@ def _match_remediation_template(finding: Finding) -> dict:
     desc_lower = finding.description.lower()
     cwe = finding.cwe_id.lower() if finding.cwe_id else ""
 
-    # Direct keyword matching
     # Direct keyword matching (ORDER MATTERS — more specific first)
     matches = {
-        # Specific Node.js/Express/Next.js patterns first
+        # Django/Python framework-specific patterns (most specific first)
+        "django_secret_key": ["secret_key", "django secret", "weak secret key", "trivially guessable"],
+        "django_csrf_exempt": ["csrf_exempt", "csrf exemption", "csrf disabled"],
+        "pickle_deserialization": ["pickle", "celery_accept_content", "insecure deserialization", "cwe-502"],
+        "django_security_headers": ["secure_ssl_redirect", "session_cookie_secure", "csrf_cookie_secure",
+                                    "secure_hsts", "missing django security", "django security header"],
+        "django_allowed_hosts": ["allowed_hosts", "host header injection"],
+        "hardcoded_password_settings": ["hardcoded password", "password in settings", "hardcoded fallback",
+                                        "password with fallback", "_password = "],
+        # Specific Node.js/Express/Next.js patterns
         "auth_bypass": ["auth bypass", "hardcoded otp", "otp bypass", "fallback otp", "fallback code",
                         "cwe-287", "authentication bypass", "dev backdoor"],
         "stack_trace_leak": ["stack trace", "error.stack", "cwe-209", "stack leak"],
@@ -386,16 +490,29 @@ class ReportGenerator:
         1. Exact: title + file + line_number
         2. CVE-based: CVE-ID + file
         3. CWE+file: CWE-22 + upload/route.ts (catches same-vuln-type same-file from different sources)
-        4. Desc-prefix: title + file + desc[:100]
+           EXCLUDED for manifest files (package.json, requirements.txt) where many different CVEs share CWEs
+        4. Desc-prefix: title + file + desc[:100] + severity
         
         When duplicates are found, keep the one with higher confidence or better remediation.
         """
         seen = {}
         unique = []
 
+        # Manifest/dependency files where many different CVEs share CWEs
+        # Don't merge by CWE for these — each CVE is a separate vulnerability
+        manifest_files = {
+            'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+            'requirements.txt', 'requirements.in', 'Pipfile', 'Pipfile.lock',
+            'poetry.lock', 'setup.py', 'setup.cfg', 'pyproject.toml',
+            'Gemfile', 'Gemfile.lock', 'go.mod', 'go.sum',
+            'Cargo.toml', 'Cargo.lock', 'pom.xml', 'build.gradle',
+            'composer.json', 'composer.lock',
+        }
+
         for f in findings:
             rel_path = self._get_relative_path(f.file_path)
             norm_file = self._normalize_file_path(f.file_path)
+            file_basename = rel_path.rsplit('/', 1)[-1] if '/' in rel_path else rel_path
 
             # Extract CVE ID from title if present
             cve_match = re.search(r'(CVE-\d{4}-\d+)', f.title)
@@ -405,21 +522,19 @@ class ReportGenerator:
             cwe_num = self._extract_cwe_number(f.cwe_id)
 
             keys = set()
-            # Key 1: Exact match
+            # Key 1: Exact match (always applies)
             keys.add(f"{f.title}|{rel_path}|{f.line_number}")
             # Key 2: CVE-based (same CVE, same file)
             if cve_id:
                 keys.add(f"{cve_id}|{rel_path}")
-            # Key 3: CWE + FULL relative path — THIS catches cross-source duplicates
-            # e.g., semgrep's "Path Join Resolve Traversal" and agent's "Path Traversal in Upload"
-            # both have CWE-22 and point to the same file
-            # IMPORTANT: Use FULL rel_path, not norm_file, to avoid merging different files
-            # e.g., send-otp/route.ts and verify-otp/route.ts are DIFFERENT files
-            if cwe_num and rel_path:
-                keys.add(f"{cwe_num}|{rel_path}")
-            # Key 4: Description-prefix match
+            # Key 3: CWE + file + LINE — catches cross-source duplicates for same issue
+            # at the SAME location (e.g., semgrep + bandit both find CWE-327 on line 26)
+            # SKIP for manifest files where many different CVEs share CWEs
+            if cwe_num and rel_path and file_basename not in manifest_files:
+                keys.add(f"{cwe_num}|{rel_path}|{f.line_number}")
+            # Key 4: Description-prefix match — include severity + line to be precise
             desc_prefix = f.description[:100].strip()
-            keys.add(f"{f.title}|{rel_path}|{desc_prefix}")
+            keys.add(f"{f.title}|{rel_path}|{f.severity.value}|{f.line_number}|{desc_prefix}")
 
             is_duplicate = False
             for key in keys:
@@ -605,8 +720,40 @@ class ReportGenerator:
             filtered.pop()
         return '\n'.join(filtered).strip()
 
-    def _detect_language(self) -> str:
-        """Auto-detect code language from tech stack."""
+    def _detect_language(self, file_path: str = "") -> str:
+        """Auto-detect code language from file extension, fallback to tech stack."""
+        # Per-finding detection based on file extension (most accurate)
+        if file_path:
+            # Handle multi-file paths like "staging.py and production.py" or "staging.py / production.py"
+            clean_path = file_path.split(' and ')[0].split(' / ')[0].strip()
+            ext = clean_path.rsplit('.', 1)[-1].lower() if '.' in clean_path else ''
+            ext_map = {
+                'py': 'python',
+                'js': 'javascript', 'jsx': 'javascript', 'mjs': 'javascript',
+                'ts': 'typescript', 'tsx': 'typescript',
+                'java': 'java',
+                'go': 'go',
+                'php': 'php',
+                'rb': 'ruby',
+                'rs': 'rust',
+                'c': 'c', 'cpp': 'cpp', 'h': 'c',
+                'cs': 'csharp',
+                'yml': 'yaml', 'yaml': 'yaml',
+                'json': 'json',
+                'html': 'html', 'htm': 'html',
+                'xml': 'xml',
+                'sh': 'bash', 'bash': 'bash',
+                'sql': 'sql',
+                'dockerfile': 'dockerfile',
+            }
+            # Handle files like 'Dockerfile' with no extension
+            basename = clean_path.rsplit('/', 1)[-1].lower() if '/' in clean_path else clean_path.lower()
+            if basename == 'dockerfile':
+                return 'dockerfile'
+            if ext in ext_map:
+                return ext_map[ext]
+
+        # Fallback: global tech stack detection
         raw = self.result.tech_stack or ""
         tech = (", ".join(raw) if isinstance(raw, list) else str(raw)).lower()
         if any(t in tech for t in ['typescript', 'tsx', 'react']):
@@ -629,7 +776,7 @@ class ReportGenerator:
         finding = self._enrich_finding(finding)
 
         rel_path = self._get_relative_path(finding.file_path)
-        lang = self._detect_language()
+        lang = self._detect_language(finding.file_path or "")
         lines = []
 
         # Header

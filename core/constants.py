@@ -35,6 +35,16 @@ LAYER_2_SKILLS = [
     "sast-security-hardening-engine.md",
 ]
 
+# Framework-specific skills — only run when the matching framework is detected.
+# Maps framework name (from recon agent) → skill filename.
+# This saves tokens by not running irrelevant framework skills.
+FRAMEWORK_SKILLS = {
+    "django":  "sast-django-security-engine.md",
+    "flask":   "sast-flask-security-engine.md",
+    "express": "sast-express-security-engine.md",
+    "nextjs":  "sast-nextjs-security-engine.md",
+}
+
 LAYER_3_SKILLS = [
     "sanitizer-recognition-engine.md",
     "false-positive-reduction-engine.md",

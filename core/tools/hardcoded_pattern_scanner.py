@@ -134,6 +134,24 @@ PATTERNS = [
                               "requireAuth", "withAuth", "isAuthenticated", "jwt", "bearer",
                               "authorization", "cookie", "session"],
     },
+    {
+        "id": "env-var-fallback-secret",
+        "title": "Hardcoded Fallback Password/Secret in Environment Variable Read",
+        "description": (
+            "An environment variable read (os.environ.get or process.env) has a hardcoded "
+            "fallback value for a security-sensitive setting (*_PASSWORD, *_SECRET, *_KEY, *_TOKEN). "
+            "If the environment variable is not set in production, the hardcoded fallback becomes "
+            "the live value, exposing credentials to anyone who reads the source code."
+        ),
+        "severity": Severity.CRITICAL,
+        "cwe_id": "CWE-798: Use of Hard-coded Credentials",
+        "owasp": "A07:2021 - Identification and Authentication Failures",
+        # Match: os.environ.get('ANYTHING_PASSWORD', 'non_empty_value')
+        # Also: process.env.SECRET || 'fallback'
+        "regex": r"""(?:os\.environ\.get\s*\(\s*['\"][^'"]*(?:PASSWORD|SECRET|KEY|TOKEN)[^'"]*['"]\s*,\s*['"][^'"]+['"]\s*\))|(?:process\.env\.\w*(?:PASSWORD|SECRET|KEY|TOKEN)\w*\s*\|\|\s*['"][^'"]+['"])""",
+        "file_patterns": ["*.py", "*.js", "*.ts"],
+        "context_keywords": ["password", "secret", "key", "token", "credential", "api"],
+    },
 ]
 
 

@@ -5,6 +5,8 @@ from pre-analysis results (symbol table + call graph + scanner findings).
 This is the core of token cost reduction: instead of sending 200K chars
 of raw code, it sends only ~20-30K chars of relevant functions.
 """
+import os
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 from .symbol_table import SymbolTable, FunctionSymbol
 from .call_graph import CallGraph
@@ -27,9 +29,10 @@ class SmartContextBuilder:
     # Maximum context to send to LLM
     MAX_CONTEXT_CHARS = 60000
 
-    def __init__(self, symbol_table: SymbolTable, call_graph: CallGraph):
+    def __init__(self, symbol_table: SymbolTable, call_graph: CallGraph, target_path: str = None):
         self.symbol_table = symbol_table
         self.call_graph = call_graph
+        self.target_path = target_path
 
     def build_context(self, full_context: str = "",
                       scanner_files: List[str] = None) -> Dict:
@@ -98,6 +101,22 @@ class SmartContextBuilder:
             for func in file_funcs:
                 _add(func, f"scanner_flagged_file:{filepath}")
 
+        # ── Step 7: Include security-relevant config/settings files ──
+        # Settings files (settings.py, local.py, production.py, Dockerfile, etc.)
+        # are pure variable assignments with NO functions — the LLM never sees them
+        # from function-based analysis. But they contain critical security config:
+        # SECRET_KEY, ALLOWED_HOSTS, CSRF settings, security headers, etc.
+        config_file_contents = self._collect_security_config_files(
+            full_context, scanner_files
+        )
+        # Log config files found for debugging
+        if config_file_contents:
+            import sys
+            print(f"[SmartContext] Found {len(config_file_contents)} config files: {list(config_file_contents.keys())}", file=sys.stderr)
+        else:
+            import sys
+            print(f"[SmartContext] WARNING: No config files found!", file=sys.stderr)
+
         # ── Collect selected functions ──
         selected = [
             f for f in self.symbol_table.functions
@@ -123,6 +142,26 @@ class SmartContextBuilder:
         header = self._build_header(stats, graph_stats, chains)
         context_parts.append(header)
         total_chars += len(header)
+
+        # Add security-relevant config files BEFORE function code
+        # so the LLM sees settings (SECRET_KEY, ALLOWED_HOSTS, etc.) first
+        if config_file_contents:
+            config_header = "\n═══ SECURITY-RELEVANT CONFIGURATION FILES ═══\n"
+            config_header += "These files contain security settings. Check for:\n"
+            config_header += "- Hardcoded secrets, weak SECRET_KEY, debug mode\n"
+            config_header += "- Missing security headers (SECURE_SSL_REDIRECT, SESSION_COOKIE_SECURE, etc.)\n"
+            config_header += "- Wildcard ALLOWED_HOSTS, CSRF exemptions, pickle usage\n"
+            config_header += "- Hardcoded passwords with fallback defaults\n"
+            config_header += "═" * 55 + "\n"
+            context_parts.append(config_header)
+            total_chars += len(config_header)
+
+            for filepath, content in config_file_contents.items():
+                file_block = f"\n--- CONFIG: {filepath} ---\n{content}\n"
+                if total_chars + len(file_block) < self.MAX_CONTEXT_CHARS:
+                    context_parts.append(file_block)
+                    total_chars += len(file_block)
+                    files_included.add(filepath)
 
         # Add selected function code
         current_file = None
@@ -173,6 +212,105 @@ class SmartContextBuilder:
                 ) if full_context else 0,
             },
         }
+
+    # ─── Security config file patterns ───
+    # These file names/paths contain security-critical settings
+    # that the LLM must analyze for misconfigurations.
+    SECURITY_CONFIG_NAMES = {
+        # Python/Django/Flask settings
+        'settings.py', 'local.py', 'production.py', 'staging.py',
+        'base.py', 'config.py', 'conf.py',
+        # JS/TS config
+        'next.config.js', 'next.config.ts', 'next.config.mjs',
+        'nuxt.config.js', 'nuxt.config.ts',
+        'vite.config.js', 'vite.config.ts',
+        'webpack.config.js',
+        'server.js', 'server.ts', 'app.js', 'app.ts',
+        # Infrastructure
+        'Dockerfile', 'Dockerfile.production',
+        'docker-compose.yml', 'docker-compose.yaml',
+        'docker-compose.production.yml',
+        'nginx.conf', '.htaccess',
+        # CI/CD
+        '.gitlab-ci.yml', '.github/workflows',
+    }
+
+    SECURITY_CONFIG_DIRS = {
+        'settings', 'config', 'conf', 'deploy', 'infra',
+    }
+
+    # Max chars per config file to include
+    MAX_CONFIG_FILE_CHARS = 4000
+    # Max total chars for all config files
+    MAX_TOTAL_CONFIG_CHARS = 20000
+
+    def _collect_security_config_files(self, full_context: str,
+                                        scanner_files: List[str]) -> Dict[str, str]:
+        """
+        Find and read security-relevant config/settings files.
+        These are pure-assignment files (no functions) that contain
+        critical security settings the LLM must analyze.
+        """
+        config_contents = {}
+        total_chars = 0
+
+        # Use the target path passed directly from CodeParser
+        # (previously inferred from symbol table which was unreliable)
+        target_path = self.target_path
+
+        # Fallback: try to infer from symbol table if not provided
+        if not target_path or not os.path.isdir(target_path):
+            if self.symbol_table.functions:
+                files = set(f.file for f in self.symbol_table.functions if f.file)
+                if files:
+                    try:
+                        target_path = os.path.commonpath(list(files))
+                    except ValueError:
+                        pass
+
+        if not target_path or not os.path.isdir(target_path):
+            return config_contents
+
+        skip_dirs = {'node_modules', '.git', '.venv', 'venv', '__pycache__',
+                     'dist', 'build', '.next', '.tox', 'coverage', '.eggs'}
+
+        for root, dirs, files in os.walk(target_path):
+            # Skip irrelevant directories
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+
+            rel_root = os.path.relpath(root, target_path)
+            # Check if the directory itself is a settings/config directory
+            dir_basename = os.path.basename(root).lower()
+            is_config_dir = dir_basename in self.SECURITY_CONFIG_DIRS
+
+            for filename in files:
+                if total_chars >= self.MAX_TOTAL_CONFIG_CHARS:
+                    break
+
+                filepath = os.path.join(root, filename)
+                rel_path = os.path.relpath(filepath, target_path)
+
+                # Match by filename or by being in a config directory
+                is_config_file = (
+                    filename in self.SECURITY_CONFIG_NAMES or
+                    filename.lower() in self.SECURITY_CONFIG_NAMES or
+                    (is_config_dir and filename.endswith('.py'))
+                )
+
+                if not is_config_file:
+                    continue
+
+                try:
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read(self.MAX_CONFIG_FILE_CHARS)
+
+                    if content.strip():
+                        config_contents[rel_path] = content
+                        total_chars += len(content)
+                except Exception:
+                    continue
+
+        return config_contents
 
     def _build_header(self, sym_stats: Dict, graph_stats: Dict,
                       chains: List[Dict]) -> str:

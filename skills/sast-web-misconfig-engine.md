@@ -34,6 +34,35 @@ Read the main server file (app entry, server setup) and check:
 - Are request body size limits set? Are they reasonable?
 - Is there file upload size and type validation?
 
+### Step 1.5: Django-Specific Configuration Checks
+**If this is a Django project, check ALL of these in settings files:**
+
+**ALLOWED_HOSTS:**
+- `ALLOWED_HOSTS = ['*']` → **HIGH** (Host header injection, cache poisoning)
+- Must be explicit: `ALLOWED_HOSTS = ['example.com']`
+
+**Security Middleware Settings (report MISSING ones as MEDIUM):**
+- `SECURE_SSL_REDIRECT = True`
+- `SECURE_HSTS_SECONDS` (should be ≥ 31536000)
+- `SESSION_COOKIE_SECURE = True`
+- `CSRF_COOKIE_SECURE = True`
+- `SECURE_BROWSER_XSS_FILTER = True`
+- `X_FRAME_OPTIONS = 'DENY'`
+- `SECURE_CONTENT_TYPE_NOSNIFF = True`
+
+**Middleware Order:**
+- `SecurityMiddleware` should be FIRST in `MIDDLEWARE`
+- `CsrfViewMiddleware` MUST be present
+
+**CSRF Exemptions:**
+- Count all `@csrf_exempt` usages across the project
+- Report as HIGH if >5 endpoints are exempted
+- Especially dangerous on: payment, account, checkout endpoints
+
+**Pickle in Celery:**
+- `CELERY_ACCEPT_CONTENT` includes `'pickle'` → **HIGH** (RCE)
+- `CELERY_TASK_SERIALIZER = 'pickle'` → **HIGH**
+
 ### Step 2: Check Static File and Upload Handling
 - Are user-uploaded files served directly without authentication?
 - Can an attacker access other users' uploaded files by guessing/enumerating filenames?

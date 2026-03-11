@@ -27,6 +27,33 @@ Scan for variables, constants, and configuration values that represent sensitive
 
 **Why these matter:** Even if gated behind `process.env.NODE_ENV === 'development'` or `!process.env.SOME_VAR`, if the condition can be true in production (env var not set), the bypass is active.
 
+### Step 2.5: Find Hardcoded DEFAULT VALUES in Environment Variable Reads
+**THIS IS CRITICALLY IMPORTANT AND OFTEN MISSED:**
+
+These patterns look "safe" because they use environment variables, but they have **hardcoded fallback defaults** that become the actual value if the env var is missing:
+
+```python
+# Python — VULNERABLE (has hardcoded fallback):
+SECRET_KEY = os.environ.get('SECRET_KEY', 'my-weak-secret')
+PASSWORD = os.environ.get('DB_PASSWORD', 'admin123')
+BENEFIT_PASSWORD = os.environ.get('BENEFIT_PWD', '100156638')
+
+# Node.js — VULNERABLE (has hardcoded fallback):
+const secret = process.env.JWT_SECRET || 'dev-secret-key'
+const apiKey = process.env.API_KEY ?? 'default-key'
+```
+
+**Why this is dangerous:** If the environment variable is NOT set in production (misconfiguration, new deployment), the hardcoded fallback becomes the live value. Attackers who read the source code know the secret.
+
+**SAFE patterns (no fallback or empty fallback):**
+```python
+SECRET_KEY = os.environ['SECRET_KEY']           # Crashes if missing — SAFE
+SECRET_KEY = os.environ.get('SECRET_KEY')        # None if missing — SAFE
+PASSWORD = os.environ.get('DB_PASSWORD', '')     # Empty fallback — SAFE
+```
+
+Report hardcoded defaults as **CRITICAL** for passwords/keys, **HIGH** for other config.
+
 ### Step 3: Check the Source of the Value
 For each potential secret, ask: **Is the value hardcoded in the source code, or is it loaded from an external secure source?**
 

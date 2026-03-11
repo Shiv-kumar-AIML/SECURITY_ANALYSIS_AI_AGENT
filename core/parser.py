@@ -151,7 +151,7 @@ class CodeParser:
 
             # Step 4: Build smart context
             full_context = self.extract_context(max_chars)
-            context_builder = SmartContextBuilder(symbol_table, call_graph)
+            context_builder = SmartContextBuilder(symbol_table, call_graph, target_path=str(self.target_dir))
             result = context_builder.build_context(
                 full_context=full_context,
                 scanner_files=scanner_files or [],
