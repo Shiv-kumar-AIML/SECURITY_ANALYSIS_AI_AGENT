@@ -36,7 +36,7 @@ These patterns look "safe" because they use environment variables, but they have
 # Python — VULNERABLE (has hardcoded fallback):
 SECRET_KEY = os.environ.get('SECRET_KEY', 'my-weak-secret')
 PASSWORD = os.environ.get('DB_PASSWORD', 'admin123')
-BENEFIT_PASSWORD = os.environ.get('BENEFIT_PWD', '100156638')
+PAYMENT_SECRET = os.environ.get('PAYMENT_SECRET', 'default_secret_123')
 
 # Node.js — VULNERABLE (has hardcoded fallback):
 const secret = process.env.JWT_SECRET || 'dev-secret-key'

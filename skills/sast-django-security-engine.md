@@ -61,66 +61,34 @@ X_FRAME_OPTIONS = 'DENY'                     # Clickjacking protection
 If NONE of these are set at all, report as **HIGH** — the entire application lacks basic HTTP security.
 **IMPORTANT**: Report EACH setting that is missing as a separate VULNERABILITY. Do NOT combine into one finding. Check ALL settings files (base, local, production, staging) — if ANY production-related file is missing these settings, report it.
 
-### Step 6: Check Hardcoded Fallback Passwords (os.environ.get with default)
-This is a commonly MISSED vulnerability — look for this pattern EVERYWHERE:
+> **NOTE**: Hardcoded credentials, API keys, and env var fallback passwords are checked by the Universal Credential Engine. This skill focuses on Django-specific security configuration only.
 
-```python
-# VULNERABLE — hardcoded fallback value exposes secret even when env var is set!
-PASSWORD = os.environ.get('SOME_PASSWORD', 'hardcoded_value')  # ← fallback is the vulnerability!
-BENEFIT_PASSWORD = os.environ.get('BENEFIT_PASSWORD', '100156638')  # ← CRITICAL!
-SECRET = os.environ.get('SECRET', 'default_secret')  # ← CRITICAL fallback!
-```
-
-**CRITICAL if:**
-- `os.environ.get('ANY_KEY', 'non-empty-string')` where the fallback is NOT empty and contains a real credential/password
-- Especially: `*_PASSWORD`, `*_SECRET`, `*_KEY`, `*_TOKEN` variable names with non-empty fallbacks
-
-**SAFE if:**
-- `os.environ.get('KEY', '')` — empty string fallback (will fail at runtime)
-- `os.environ.get('KEY')` — returns None (no fallback)
-- `os.environ['KEY']` — raises KeyError if missing
-
-Search ALL settings/*.py files for the regex pattern: `os\.environ\.get\(.*,\s*['"]\w+` — this catches any env var with a non-empty fallback.
-
-### Step 7: Check Database Passwords
-Look for hardcoded DATABASE credentials in settings:
-- `'PASSWORD': 'hardcoded_value'` → **CRITICAL**
-- `'PASSWORD': os.environ.get('DB_PASSWORD', 'default_pass')` → **CRITICAL** (fallback!)
-- `'PASSWORD': os.environ.get('DB_PASSWORD', '')` → **SAFE** (empty fallback will fail)
-
-### Step 8: Check for Pickle Deserialization
+### Step 6: Check for Pickle Deserialization
 - `CELERY_ACCEPT_CONTENT = ['json', 'pickle']` → **HIGH** (RCE via message broker)
 - `serializer='pickle'` in celery task decorators → **HIGH**
 - `pickle.loads()` with untrusted data → **CRITICAL**
 - Celery should ONLY accept JSON: `CELERY_ACCEPT_CONTENT = ['json']`
 
-### Step 9: Check XSS via mark_safe
+### Step 7: Check XSS via mark_safe
 Search for `mark_safe()` usage:
 - `mark_safe(user_data)` or `mark_safe(model_field)` → **MEDIUM** (stored XSS if field contains user input)
 - `mark_safe(render_to_string(...))` → depends on template escaping
 - Use `format_html()` instead of `mark_safe()` for any data that could contain user input
 
-### Step 10: Check Raw SQL
+### Step 8: Check Raw SQL
 - `cursor.execute("SELECT ... " + user_input)` → **CRITICAL** (SQL injection)
 - `cursor.execute("SELECT ... %s", (param,))` → **SAFE** (parameterized)
 - `.objects.raw("SELECT ...")` with string formatting → **HIGH**
 - `.objects.extra(where=["..."])` with user input → **HIGH**
 - `.objects.raw("SELECT ... %s", [param])` → **SAFE** (parameterized)
 
-### Step 11: Check Email/API Credentials
-Look for hardcoded API keys, email passwords, payment gateway credentials:
-- `EMAIL_HOST_PASSWORD = 'SG.xxxx'` → **CRITICAL** (SendGrid API key exposed)
-- `STRIPE_SECRET_KEY = 'sk_live_...'` → **CRITICAL**
-- `AWS_SECRET_ACCESS_KEY = '...'` → **CRITICAL**
-- Any `*_PASSWORD`, `*_SECRET`, `*_KEY`, `*_TOKEN` with hardcoded literal values
-
-### Step 12: Check Password Validators
+### Step 9: Check Password Validators
 In production settings, verify `AUTH_PASSWORD_VALIDATORS` is configured:
 - Missing entirely → **MEDIUM** (no password strength requirements)
 - Only `MinimumLengthValidator` → **MEDIUM** (length only, no complexity)
 - Should have: `UserAttributeSimilarityValidator`, `MinimumLengthValidator`, `CommonPasswordValidator`, `NumericPasswordValidator`
 
-### Step 13: Check for Admin URL Disclosure
+### Step 10: Check for Admin URL Disclosure
 - Default `admin/` URL path → **LOW** (makes admin panel easily discoverable)
 - Should use a non-obvious path like `secret-admin-panel-xyz/`
 

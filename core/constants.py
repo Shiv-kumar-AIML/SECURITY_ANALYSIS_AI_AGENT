@@ -28,7 +28,7 @@ LAYER_2_SKILLS = [
     "sast-jwt-oidc-engine.md",
     "sast-authorization-logic-engine.md",
     "sast-prototype-pollution-engine.md",
-    "sast-secret-detection-engine.md",
+    "sast-universal-credential-engine.md",
     "sast-web-misconfig-engine.md",
     "sca-dependency-engine.md",
     "sast-auth-bypass-engine.md",

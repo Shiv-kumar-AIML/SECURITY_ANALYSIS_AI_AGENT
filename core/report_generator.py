@@ -316,7 +316,7 @@ return render(request, 'greeting.html', {'name': user_name})"""
         "why": "Django SECRET_KEY is hardcoded with a weak/short value. This key is used for session signing, CSRF tokens, password reset tokens, and cryptographic signing. A guessable key allows session forgery and CSRF bypass.",
         "solution": "Generate a strong random key and load it from environment variables. Never commit the real key to source control.",
         "code": """# VULNERABLE:
-SECRET_KEY = 'megamart'
+SECRET_KEY = 'my-short-key'
 SECRET_KEY = 'django-insecure-abc'
 
 # FIXED:
