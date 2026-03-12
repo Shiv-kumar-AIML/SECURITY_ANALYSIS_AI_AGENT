@@ -31,20 +31,17 @@ dependencies = [
     # Core LLM Providers
     "google-generativeai>=0.8.0",
     "openai>=1.40.0",
-
     # CLI & Display
     "rich>=13.7.0",
-
     # Utilities
     "pyyaml>=6.0",
     "jinja2>=3.1.0",
-
     # Data Processing
     "dataclasses-json>=0.6.0",
-
     # Security Scanners (Python-based — auto-installed)
     "semgrep>=1.50.0",
     "bandit>=1.7.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.optional-dependencies]
