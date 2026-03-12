@@ -465,9 +465,9 @@ class ReportGenerator:
     @staticmethod
     def _normalize_file_path(file_path: str) -> str:
         """Extract normalized filename for dedup (just the relative tail)."""
-        # Strip cloned_repos/repo_name prefix and take only the app-relative path
-        if 'cloned_repos/' in file_path:
-            parts = file_path.split('cloned_repos/')
+        # Strip workspace/repo_name prefix and take only the app-relative path
+        if 'workspace/' in file_path:
+            parts = file_path.split('workspace/')
             if len(parts) > 1:
                 repo_rest = parts[1]
                 slash_idx = repo_rest.find('/')
@@ -567,8 +567,8 @@ class ReportGenerator:
         target = self.result.target_path
         if target and file_path.startswith(target):
             return os.path.relpath(file_path, target)
-        if "cloned_repos/" in file_path:
-            parts = file_path.split("cloned_repos/")
+        if "workspace/" in file_path:
+            parts = file_path.split("workspace/")
             if len(parts) > 1:
                 repo_and_rest = parts[1]
                 slash_idx = repo_and_rest.find("/")

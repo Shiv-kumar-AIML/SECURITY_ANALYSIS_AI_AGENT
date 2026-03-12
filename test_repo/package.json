@@ -1,9 +1,0 @@
-{
-  "name": "vulnerable-app",
-  "version": "1.0.0",
-  "dependencies": {
-    "express": "4.15.0",
-    "lodash": "4.17.10",
-    "mysql": "2.18.1"
-  }
-}

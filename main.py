@@ -13,7 +13,7 @@ from pathlib import Path
 from core.parser import CodeParser
 from core.orchestrator import SASTOrchestrator
 from core.report_generator import ReportGenerator
-from core.constants import SKILLS_DIR, DEFAULT_OLLAMA_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_GEMINI_MODEL, BASE_DIR, CLONED_REPOS_DIR
+from core.constants import SKILLS_DIR, DEFAULT_OLLAMA_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_GEMINI_MODEL, BASE_DIR, WORKSPACE_DIR
 from core.tools.tool_registry import ToolRegistry
 
 try:
@@ -60,7 +60,7 @@ def clone_repo(repo_url: str, console=None) -> str:
     if not repo_name:
         repo_name = "cloned_repo"
 
-    clone_dir = CLONED_REPOS_DIR / repo_name
+    clone_dir = WORKSPACE_DIR / repo_name
 
     if clone_dir.exists():
         msg = f"Repository already exists at {clone_dir}. Using existing code..."

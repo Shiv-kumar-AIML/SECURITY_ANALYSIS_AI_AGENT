@@ -7,7 +7,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 SKILLS_DIR = BASE_DIR / "skills"
 REPORTS_DIR = BASE_DIR / "reports"
-CLONED_REPOS_DIR = BASE_DIR / "cloned_repos"
+WORKSPACE_DIR = BASE_DIR / "workspace"
 
 # Default LLM configs
 DEFAULT_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
