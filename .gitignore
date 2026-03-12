@@ -20,7 +20,9 @@ env/
 
 # Project
 reports/
-workspace/
+workspace/*
+!workspace/test_repo/
+!workspace/test_repo/**
 .env
 *.log
 
