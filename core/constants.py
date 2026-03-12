@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -9,7 +11,7 @@ CLONED_REPOS_DIR = BASE_DIR / "cloned_repos"
 
 # Default LLM configs
 DEFAULT_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5-coder:latest")
 
 # Skills Layer Definitions
 LAYER_1_SKILLS = [

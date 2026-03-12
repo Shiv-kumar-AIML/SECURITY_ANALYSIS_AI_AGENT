@@ -15,7 +15,7 @@ class LLMProvider:
     """Multi-backend LLM provider with reasoning support."""
 
     def __init__(self, host=DEFAULT_OLLAMA_HOST, model=DEFAULT_MODEL,
-                 gemini_key=None, openai_key=None, openai_base_url=None):
+                 gemini_key=None, openai_key=None, openai_base_url=None, llm_provider=None):
         self.host = host
         self.model = model
         self.gemini_key = gemini_key
@@ -25,17 +25,24 @@ class LLMProvider:
         self.total_tokens = 0
         self.total_calls = 0
 
-        # Determine engine
-        if self.openai_key:
-            self.engine = "openai"
+        # Determine llm_provider
+        if llm_provider:
+            self.llm_provider = llm_provider.lower()
+            if self.llm_provider == "gemini":
+                import google.generativeai as genai
+                genai.configure(api_key=self.gemini_key)
+                if "gemini" not in self.model.lower():
+                    self.model = "gemini-2.5-flash"
+        elif self.openai_key:
+            self.llm_provider = "openai"
         elif self.gemini_key:
-            self.engine = "gemini"
+            self.llm_provider = "gemini"
             import google.generativeai as genai
             genai.configure(api_key=self.gemini_key)
             if "gemini" not in self.model.lower():
                 self.model = "gemini-2.5-flash"
         else:
-            self.engine = "ollama"
+            self.llm_provider = "ollama"
 
     def generate(self, prompt: str,
                  system: str = "You are an enterprise-grade security analysis agent.",
@@ -47,9 +54,9 @@ class LLMProvider:
 
         for attempt in range(max_retries):
             try:
-                if self.engine == "openai":
+                if self.llm_provider == "openai":
                     result = self._generate_openai(prompt, system, temperature, json_mode)
-                elif self.engine == "gemini":
+                elif self.llm_provider == "gemini":
                     result = self._generate_gemini(prompt, system, temperature)
                 else:
                     result = self._generate_ollama(prompt, system, temperature, json_mode)
@@ -149,10 +156,10 @@ class LLMProvider:
             raise RuntimeError(f"Ollama error at {self.host}: {e}. Ensure Ollama is running and model '{self.model}' is pulled.")
 
     @property
-    def engine_display(self) -> str:
+    def llm_provider_display(self) -> str:
         names = {
             "openai": "OpenAI API",
             "gemini": "Google Gemini",
             "ollama": "Local Ollama",
         }
-        return names.get(self.engine, self.engine)
+        return names.get(self.llm_provider, self.llm_provider)

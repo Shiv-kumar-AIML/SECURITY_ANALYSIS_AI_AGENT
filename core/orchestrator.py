@@ -16,19 +16,21 @@ class SASTOrchestrator:
 
     def __init__(self, target_code: str, target_path: str = "",
                  model_name: str = None, gemini_key: str = None,
-                 openai_key: str = None, openai_base_url: str = None):
+                 openai_key: str = None, openai_base_url: str = None,
+                 llm_provider: str = None):
         self.target_code = target_code
         self.target_path = target_path
 
-        self.provider = LLMProvider(
+        self.llm_provider = LLMProvider(
             model=model_name or None,
             gemini_key=gemini_key,
             openai_key=openai_key,
             openai_base_url=openai_base_url,
+            llm_provider=llm_provider,
         )
 
         self.coordinator = CoordinatorAgent(
-            llm=self.provider,
+            llm=self.llm_provider,
             target_path=target_path,
         )
 
