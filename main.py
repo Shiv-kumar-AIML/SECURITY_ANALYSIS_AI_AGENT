@@ -125,13 +125,17 @@ def print_tool_status(console):
     console.print()
 
 
-def print_scan_config(console, target_path, engine, model, tools_only=False):
+def print_scan_config(console, target_path, llm_provider, model, tools_only=False):
     """Print scan configuration panel."""
+    
+    # Capitalize cleanly for display
+    display_provider = "Google Gemini" if llm_provider == "gemini" else "OpenAI API" if llm_provider == "openai" else "Local Ollama"
+    
     config_text = Text()
     config_text.append("  Target:  ", style="dim")
     config_text.append(f"{Path(target_path).resolve()}\n", style="bold")
-    config_text.append("  Engine:  ", style="dim")
-    config_text.append(f"{engine}\n", style="bold cyan")
+    config_text.append("  Provider: ", style="dim")
+    config_text.append(f"{display_provider}\n", style="bold cyan")
     config_text.append("  Model:   ", style="dim")
     config_text.append(f"{model}\n", style="bold green")
     config_text.append("  Mode:    ", style="dim")
@@ -218,16 +222,20 @@ def main():
                         help="Directory of the codebase OR a Git repository URL to scan")
     parser.add_argument("--model",
                         help=f"LLM model to use (default: {DEFAULT_MODEL})",
-                        default=DEFAULT_MODEL)
+                        default=None)
+    parser.add_argument("--llm-provider",
+                        help="LLM provider: openai, gemini, or ollama (falls back to keys if not set)",
+                        choices=["openai", "gemini", "ollama"],
+                        default=None)
     parser.add_argument("--gemini-key",
                         help="Google Gemini API Key",
-                        default=os.getenv("GEMINI_API_KEY"))
+                        default=None)
     parser.add_argument("--openai-key",
                         help="OpenAI API Key (or compatible)",
-                        default=os.getenv("OPENAI_API_KEY"))
+                        default=None)
     parser.add_argument("--openai-base-url",
                         help="OpenAI-compatible base URL",
-                        default=os.getenv("OPENAI_BASE_URL"))
+                        default=None)
     parser.add_argument("--tools-only",
                         action="store_true",
                         help="Run only external tools (no LLM analysis)")
@@ -239,6 +247,16 @@ def main():
                         default="all",
                         help="Report output format (default: all)")
     args = parser.parse_args()
+
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    # Resolution prioritization: CLI Arguments first, then Env Variables, then Defaults
+    llm_provider = args.llm_provider or os.getenv("LLM_PROVIDER")
+    openai_key = args.openai_key or os.getenv("OPENAI_API_KEY")
+    gemini_key = args.gemini_key or os.getenv("GEMINI_API_KEY")
+    openai_base_url = args.openai_base_url or os.getenv("OPENAI_BASE_URL")
+    model_name = args.model or os.getenv("DEFAULT_MODEL") or DEFAULT_MODEL
 
     console = get_console()
     check_setup()
@@ -254,22 +272,25 @@ def main():
     if target_path.startswith(("http://", "https://", "git@")):
         target_path = clone_repo(target_path, console)
 
-    # Determine engine
-    if args.openai_key:
-        engine_name = "OpenAI API"
-    elif args.gemini_key:
-        engine_name = "Google Gemini"
-    else:
-        engine_name = "Local Ollama"
+    # Determine llm_provider purely from explicit or fallback input
+    if not llm_provider:
+        if openai_key:
+            llm_provider = "openai"
+        elif gemini_key:
+            llm_provider = "gemini"
+        else:
+            llm_provider = "ollama"
+    
+    llm_provider = llm_provider.lower()
 
     # Print config
     if console:
-        print_scan_config(console, target_path, engine_name, args.model, args.tools_only)
+        print_scan_config(console, target_path, llm_provider, model_name, args.tools_only)
         print_tool_status(console)
     else:
         print(f"[+] Target: {Path(target_path).resolve()}")
-        print(f"[+] Engine: {engine_name}")
-        print(f"[+] Model: {args.model}")
+        print(f"[+] Provider: {llm_provider}")
+        print(f"[+] Model: {model_name}")
 
     # Parse code
     if console:
@@ -329,10 +350,11 @@ def main():
         orchestrator = SASTOrchestrator(
             target_code=target_code,
             target_path=target_path,
-            model_name=args.model,
-            gemini_key=args.gemini_key,
-            openai_key=args.openai_key,
-            openai_base_url=args.openai_base_url,
+            model_name=model_name,
+            gemini_key=gemini_key,
+            openai_key=openai_key,
+            openai_base_url=openai_base_url,
+            llm_provider=llm_provider,
         )
 
         if args.tools_only:
