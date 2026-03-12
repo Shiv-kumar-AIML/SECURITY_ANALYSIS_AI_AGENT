@@ -94,7 +94,7 @@ class ReportValidatorAgent(BaseAgent):
         """Build a concise summary of findings for LLM validation."""
         parts = []
         for i, f in enumerate(findings, start_idx):
-            rel_path = f.file_path.split('cloned_repos/')[-1] if 'cloned_repos/' in (f.file_path or '') else (f.file_path or 'N/A')
+            rel_path = f.file_path.split('workspace/')[-1] if 'workspace/' in (f.file_path or '') else (f.file_path or 'N/A')
             parts.append(f"""
 FINDING #{i}:
   Title: {f.title}

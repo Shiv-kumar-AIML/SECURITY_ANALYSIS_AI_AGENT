@@ -20,7 +20,7 @@ env/
 
 # Project
 reports/
-cloned_repos/
+workspace/
 .env
 *.log
 

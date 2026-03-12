@@ -56,7 +56,7 @@ def clone_repo(url: str, dest: Optional[str] = None) -> str:
         local_cache.mkdir(parents=True, exist_ok=True)
         
         parsed = urlparse(safe_url)
-        repo_name = os.path.basename(parsed.path).replace(".git", "") or "cloned_repo"
+        repo_name = os.path.basename(parsed.path).replace(".git", "") or "repo"
         dest_path = local_cache / repo_name
         
         if dest_path.exists() and any(dest_path.iterdir()):
