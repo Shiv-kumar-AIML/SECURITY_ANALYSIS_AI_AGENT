@@ -8,16 +8,15 @@ import time
 import urllib.request
 import urllib.error
 from typing import Optional
-from .constants import DEFAULT_OLLAMA_HOST, DEFAULT_MODEL
+from .constants import DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_GEMINI_MODEL
 
 
 class LLMProvider:
     """Multi-backend LLM provider with reasoning support."""
 
-    def __init__(self, host=DEFAULT_OLLAMA_HOST, model=DEFAULT_MODEL,
+    def __init__(self, host=DEFAULT_OLLAMA_HOST, model=None,
                  gemini_key=None, openai_key=None, openai_base_url=None, llm_provider=None):
         self.host = host
-        self.model = model
         self.gemini_key = gemini_key
         self.openai_key = openai_key
         self.openai_base_url = openai_base_url or "https://api.openai.com/v1"
@@ -28,21 +27,29 @@ class LLMProvider:
         # Determine llm_provider
         if llm_provider:
             self.llm_provider = llm_provider.lower()
-            if self.llm_provider == "gemini":
-                import google.generativeai as genai
-                genai.configure(api_key=self.gemini_key)
-                if "gemini" not in self.model.lower():
-                    self.model = "gemini-2.5-flash"
         elif self.openai_key:
             self.llm_provider = "openai"
         elif self.gemini_key:
             self.llm_provider = "gemini"
+        else:
+            self.llm_provider = "ollama"
+
+        # Determine model
+        self.model = model
+        if not self.model:
+            if self.llm_provider == "openai":
+                self.model = DEFAULT_OPENAI_MODEL
+            elif self.llm_provider == "gemini":
+                self.model = DEFAULT_GEMINI_MODEL
+            else:
+                self.model = DEFAULT_OLLAMA_MODEL
+
+        # Configure Google Gemini if needed
+        if self.llm_provider == "gemini":
             import google.generativeai as genai
             genai.configure(api_key=self.gemini_key)
             if "gemini" not in self.model.lower():
-                self.model = "gemini-2.5-flash"
-        else:
-            self.llm_provider = "ollama"
+                self.model = DEFAULT_GEMINI_MODEL
 
     def generate(self, prompt: str,
                  system: str = "You are an enterprise-grade security analysis agent.",

@@ -13,7 +13,7 @@ from pathlib import Path
 from core.parser import CodeParser
 from core.orchestrator import SASTOrchestrator
 from core.report_generator import ReportGenerator
-from core.constants import SKILLS_DIR, DEFAULT_MODEL, BASE_DIR, CLONED_REPOS_DIR
+from core.constants import SKILLS_DIR, DEFAULT_OLLAMA_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_GEMINI_MODEL, BASE_DIR, CLONED_REPOS_DIR
 from core.tools.tool_registry import ToolRegistry
 
 try:
@@ -221,7 +221,7 @@ def main():
     parser.add_argument("target",
                         help="Directory of the codebase OR a Git repository URL to scan")
     parser.add_argument("--model",
-                        help=f"LLM model to use (default: {DEFAULT_MODEL})",
+                        help="LLM model to use (overrides provider defaults)",
                         default=None)
     parser.add_argument("--llm-provider",
                         help="LLM provider: openai, gemini, or ollama (falls back to keys if not set)",
@@ -256,7 +256,6 @@ def main():
     openai_key = args.openai_key or os.getenv("OPENAI_API_KEY")
     gemini_key = args.gemini_key or os.getenv("GEMINI_API_KEY")
     openai_base_url = args.openai_base_url or os.getenv("OPENAI_BASE_URL")
-    model_name = args.model or os.getenv("DEFAULT_MODEL") or DEFAULT_MODEL
 
     console = get_console()
     check_setup()
@@ -282,6 +281,16 @@ def main():
             llm_provider = "ollama"
     
     llm_provider = llm_provider.lower()
+
+    # Determine default model for the selected provider
+    if llm_provider == "openai":
+        provider_default_model = DEFAULT_OPENAI_MODEL
+    elif llm_provider == "gemini":
+        provider_default_model = DEFAULT_GEMINI_MODEL
+    else:
+        provider_default_model = DEFAULT_OLLAMA_MODEL
+
+    model_name = args.model or provider_default_model
 
     # Print config
     if console:

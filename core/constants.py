@@ -11,7 +11,9 @@ CLONED_REPOS_DIR = BASE_DIR / "cloned_repos"
 
 # Default LLM configs
 DEFAULT_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5-coder:latest")
+DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
 # Skills Layer Definitions
 LAYER_1_SKILLS = [
