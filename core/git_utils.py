@@ -93,3 +93,87 @@ def clone_repo(url: str, dest: Optional[str] = None) -> str:
     print(f"[-] Failed to acquire repository. Check remote URL and/or access tokens.")
     import sys
     sys.exit(1)
+
+
+# ── Incremental scan helpers ────────────────────────────────────────────
+
+def is_git_repo(path: str) -> bool:
+    """Return True if *path* is inside a git working tree."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
+def get_current_commit(path: str) -> Optional[str]:
+    """Return the current HEAD commit SHA (full) or None if unavailable."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def get_changed_files_since_commit(path: str, since_commit: str) -> Tuple[list, list, list]:
+    """
+    Return three lists — (modified, added, deleted) — of repo-relative file
+    paths that changed between *since_commit* and HEAD.
+
+    Uses ``git diff --name-status`` so we get the change type for free.
+    Returns ([], [], []) when the diff cannot be computed (e.g. first run,
+    force-push, or non-git repo).
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "diff", "--name-status", since_commit, "HEAD"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return [], [], []
+
+        modified, added, deleted = [], [], []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("\t", 1)
+            if len(parts) < 2:
+                continue
+            status, filepath = parts[0][0], parts[1]  # first char handles 'M','A','D','R','C'
+            if status in ("M", "R", "C"):
+                modified.append(filepath)
+            elif status == "A":
+                added.append(filepath)
+            elif status == "D":
+                deleted.append(filepath)
+
+        return modified, added, deleted
+    except Exception:
+        return [], [], []
+
+
+def get_untracked_files(path: str) -> list:
+    """Return untracked (new, unstaged) files in the working tree."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "-C", path, "ls-files", "--others", "--exclude-standard"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return [f.strip() for f in result.stdout.splitlines() if f.strip()]
+    except Exception:
+        pass
+    return []

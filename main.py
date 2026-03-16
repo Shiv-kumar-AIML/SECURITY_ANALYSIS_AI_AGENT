@@ -15,6 +15,7 @@ from core.orchestrator import SASTOrchestrator
 from core.report_generator import ReportGenerator
 from core.constants import SKILLS_DIR, DEFAULT_OLLAMA_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_GEMINI_MODEL, BASE_DIR, WORKSPACE_DIR
 from core.tools.tool_registry import ToolRegistry
+from core.scan_cache import ScanCache
 
 try:
     from rich.console import Console
@@ -54,7 +55,7 @@ def check_setup():
         SKILLS_DIR.mkdir(parents=True)
 
 
-def clone_repo(repo_url: str, console=None) -> str:
+def clone_repo(repo_url: str, console=None, pull: bool = False) -> str:
     parsed = urlparse(repo_url)
     repo_name = os.path.basename(parsed.path).replace(".git", "")
     if not repo_name:
@@ -63,11 +64,51 @@ def clone_repo(repo_url: str, console=None) -> str:
     clone_dir = WORKSPACE_DIR / repo_name
 
     if clone_dir.exists():
-        msg = f"Repository already exists at {clone_dir}. Using existing code..."
-        if console:
-            console.print(f"  [yellow]⚠[/yellow] {msg}")
+        if pull:
+            # Incremental mode: fetch latest commits so git diff sees new work
+            msg = f"Pulling latest changes into {clone_dir.name}..."
+            if console:
+                console.print(f"  [cyan]▸[/cyan] {msg}")
+            else:
+                print(f"[*] {msg}")
+            try:
+                result = subprocess.run(
+                    ["git", "-C", str(clone_dir), "pull", "--ff-only"],
+                    capture_output=True, text=True, timeout=60,
+                )
+                if result.returncode == 0:
+                    pulled = result.stdout.strip()
+                    label = pulled if pulled else "Already up to date."
+                    if console:
+                        console.print(f"  [green]✓[/green] {label}")
+                    else:
+                        print(f"[+] {label}")
+                else:
+                    # Fall back to fetch + reset (handles force-pushes / diverged history)
+                    subprocess.run(
+                        ["git", "-C", str(clone_dir), "fetch", "--depth=100", "origin"],
+                        check=True, capture_output=True, timeout=60,
+                    )
+                    subprocess.run(
+                        ["git", "-C", str(clone_dir), "reset", "--hard", "origin/HEAD"],
+                        check=True, capture_output=True, timeout=30,
+                    )
+                    if console:
+                        console.print(f"  [green]✓[/green] Hard-reset to origin/HEAD.")
+                    else:
+                        print("[+] Hard-reset to origin/HEAD.")
+            except Exception as e:
+                msg = f"git pull failed ({e}). Scanning existing local copy."
+                if console:
+                    console.print(f"  [yellow]⚠[/yellow] {msg}")
+                else:
+                    print(f"[!] {msg}")
         else:
-            print(f"[*] {msg}")
+            msg = f"Repository already exists at {clone_dir}. Using existing code..."
+            if console:
+                console.print(f"  [yellow]⚠[/yellow] {msg}")
+            else:
+                print(f"[*] {msg}")
         return str(clone_dir)
 
     msg = f"Cloning repository from {repo_url}..."
@@ -246,6 +287,9 @@ def main():
                         choices=["markdown", "json", "sarif", "all"],
                         default="all",
                         help="Report output format (default: all)")
+    parser.add_argument("--incremental",
+                        action="store_true",
+                        help="Only re-scan files changed since the last cached scan (git-aware)")
     args = parser.parse_args()
 
     from dotenv import load_dotenv
@@ -269,7 +313,7 @@ def main():
     # Handle Git URL
     target_path = args.target
     if target_path.startswith(("http://", "https://", "git@")):
-        target_path = clone_repo(target_path, console)
+        target_path = clone_repo(target_path, console, pull=args.incremental)
 
     # Determine llm_provider purely from explicit or fallback input
     if not llm_provider:
@@ -301,7 +345,67 @@ def main():
         print(f"[+] Provider: {llm_provider}")
         print(f"[+] Model: {model_name}")
 
-    # Parse code
+    # ── Incremental scan: compute diff before parsing ───────────────────
+    scan_cache = ScanCache(target_path)
+    cached_findings = []
+    files_to_rescan = None   # None → full scan; list → subset
+
+    if args.incremental:
+        if not scan_cache.is_warm():
+            if console:
+                console.print("  [yellow]⚠[/yellow] No previous cache found — running full scan to build baseline.")
+            else:
+                print("[*] Incremental: no previous cache — running full baseline scan.")
+        else:
+            changed, added, deleted = scan_cache.compute_diff()
+            diff_info = scan_cache.summary(changed, added, deleted)
+
+            if not changed and not added and not deleted:
+                if console:
+                    console.print("  [green]✓[/green] [bold]Incremental:[/bold] No files changed since last scan — reusing cached results.")
+                else:
+                    print("[+] Incremental: nothing changed — using cached results.")
+
+                # Restore everything from cache and skip the scan entirely
+                from core.findings import ScanResult
+                scan_result = ScanResult(target_path=target_path)
+                for f in scan_cache.get_cached_findings([]):
+                    scan_result.add_finding(f)
+                scan_result.scan_end = scan_result.scan_start
+
+                report_gen = ReportGenerator(scan_result)
+                reports_generated = []
+                fmt = args.output_format
+                if fmt in ("markdown", "all"):
+                    reports_generated.append(("Markdown", report_gen.to_markdown()))
+                if fmt in ("json", "all"):
+                    reports_generated.append(("JSON", report_gen.to_json()))
+                if fmt in ("sarif", "all"):
+                    reports_generated.append(("SARIF", report_gen.to_sarif()))
+
+                if console:
+                    console.print("\n[bold]📄 Reports Generated (from cache):[/bold]\n")
+                    for name, path in reports_generated:
+                        console.print(f"  [green]✓[/green] {name}: [link={path}]{path}[/link]")
+                else:
+                    print("\n[+] Reports Generated (from cache):")
+                    for name, path in reports_generated:
+                        print(f"  - {name}: {path}")
+                sys.exit(0)
+
+            # Partial rescan: only changed + added files
+            files_to_rescan = changed + added
+            cached_findings = scan_cache.get_cached_findings(files_to_rescan + deleted)
+
+            if console:
+                console.print(f"  [cyan]▸[/cyan] [bold]Incremental scan:[/bold] "
+                              f"{len(files_to_rescan)} changed / {len(deleted)} deleted "
+                              f"(reusing cached findings for "
+                              f"{diff_info['cached_files'] - len(files_to_rescan) - len(deleted)} unchanged files)")
+            else:
+                print(f"[*] Incremental: {len(files_to_rescan)} changed, {len(deleted)} deleted.")
+
+    # ── Parse code ───────────────────────────────────────────────────────
     if console:
         console.rule("[bold]Parsing Target Codebase[/bold]")
     else:
@@ -311,37 +415,56 @@ def main():
 
     # Smart Context (default) vs Full Context (legacy)
     if args.full_context:
-        target_code = code_parser.extract_context()
-        if console:
-            console.print(f"  [yellow]⚠[/yellow] Full context mode (legacy): [bold]{len(target_code)}[/bold] chars")
+        if files_to_rescan is not None:
+            target_code = code_parser.extract_context_for_files(files_to_rescan)
+            if console:
+                console.print(f"  [yellow]⚠[/yellow] Incremental full-context: [bold]{len(target_code)}[/bold] chars ({len(files_to_rescan)} files)")
+            else:
+                print(f"[*] Incremental full context: {len(target_code)} characters.")
         else:
-            print(f"[*] Full context mode: {len(target_code)} characters.")
+            target_code = code_parser.extract_context()
+            if console:
+                console.print(f"  [yellow]⚠[/yellow] Full context mode (legacy): [bold]{len(target_code)}[/bold] chars")
+            else:
+                print(f"[*] Full context mode: {len(target_code)} characters.")
     else:
         if console:
             console.print("  [cyan]▸[/cyan] Running pre-analysis pipeline (AST → Symbol Table → Call Graph)...")
         else:
             print("[*] Running pre-analysis pipeline...")
 
-        smart_result = code_parser.extract_smart_context()
-        target_code = smart_result["context"]
-        meta = smart_result["metadata"]
-        stats = smart_result["stats"]
-
-        if console:
-            if meta.get("used_fallback"):
-                reason = meta.get("fallback_reason", "unknown")
-                console.print(f"  [yellow]⚠[/yellow] Fallback to full context: {reason}")
-                console.print(f"  [green]✓[/green] Context: [bold]{len(target_code)}[/bold] chars")
+        # In incremental mode, skip the heavy AST pipeline and build context
+        # directly for the changed files.  The full smart-context pipeline is
+        # only worth running for a complete codebase scan.
+        if files_to_rescan is not None:
+            target_code = code_parser.extract_context_for_files(files_to_rescan)
+            if console:
+                console.print(f"  [green]✓[/green] Incremental smart context: "
+                              f"[bold]{len(target_code):,}[/bold] chars "
+                              f"({len(files_to_rescan)} changed files)")
             else:
-                console.print(f"  [green]✓[/green] Functions analyzed: [bold]{meta['functions_total']}[/bold]")
-                console.print(f"  [green]✓[/green] Security-relevant selected: [bold]{meta['functions_selected']}[/bold]")
-                console.print(f"  [green]✓[/green] Sink chains found: [bold]{meta['sink_chains_found']}[/bold] ({meta['dangerous_chains']} dangerous)")
-                console.print(f"  [green]✓[/green] Context: [bold]{stats['filtered_chars']:,}[/bold] / {stats['original_chars']:,} chars [bold bright_green]({stats['reduction_percent']}% reduction)[/bold bright_green]")
+                print(f"[+] Incremental context: {len(target_code)} chars ({len(files_to_rescan)} files).")
         else:
-            if meta.get("used_fallback"):
-                print(f"[*] Fallback to full context: {meta.get('fallback_reason', '')}")
+            smart_result = code_parser.extract_smart_context()
+            target_code = smart_result["context"]
+            meta = smart_result["metadata"]
+            stats = smart_result["stats"]
+
+            if console:
+                if meta.get("used_fallback"):
+                    reason = meta.get("fallback_reason", "unknown")
+                    console.print(f"  [yellow]⚠[/yellow] Fallback to full context: {reason}")
+                    console.print(f"  [green]✓[/green] Context: [bold]{len(target_code)}[/bold] chars")
+                else:
+                    console.print(f"  [green]✓[/green] Functions analyzed: [bold]{meta['functions_total']}[/bold]")
+                    console.print(f"  [green]✓[/green] Security-relevant selected: [bold]{meta['functions_selected']}[/bold]")
+                    console.print(f"  [green]✓[/green] Sink chains found: [bold]{meta['sink_chains_found']}[/bold] ({meta['dangerous_chains']} dangerous)")
+                    console.print(f"  [green]✓[/green] Context: [bold]{stats['filtered_chars']:,}[/bold] / {stats['original_chars']:,} chars [bold bright_green]({stats['reduction_percent']}% reduction)[/bold bright_green]")
             else:
-                print(f"[+] Smart context: {stats['filtered_chars']} / {stats['original_chars']} chars ({stats['reduction_percent']}% reduction)")
+                if meta.get("used_fallback"):
+                    print(f"[*] Fallback to full context: {meta.get('fallback_reason', '')}")
+                else:
+                    print(f"[+] Smart context: {stats['filtered_chars']} / {stats['original_chars']} chars ({stats['reduction_percent']}% reduction)")
 
     if not target_code and not args.tools_only:
         msg = "No supported source files found. Exiting."
@@ -378,6 +501,17 @@ def main():
         else:
             print(f"\n[-] {msg}")
         sys.exit(1)
+
+    # ── Merge cached findings from unchanged files ────────────────────────
+    if cached_findings:
+        for f in cached_findings:
+            scan_result.add_finding(f)
+        if console:
+            console.print(f"  [dim]↩ Merged {len(cached_findings)} cached findings from unchanged files.[/dim]")
+
+    # ── Persist cache after every successful scan ─────────────────────────
+    if args.incremental or not scan_cache.is_warm():
+        scan_cache.save(scan_result.get_confirmed())
 
     # Results summary
     if console:
