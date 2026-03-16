@@ -8,6 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SKILLS_DIR = BASE_DIR / "skills"
 REPORTS_DIR = BASE_DIR / "reports"
 WORKSPACE_DIR = BASE_DIR / "workspace"
+SCAN_CACHE_DIR = BASE_DIR / ".scan_cache"
 
 # Default LLM configs
 DEFAULT_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")

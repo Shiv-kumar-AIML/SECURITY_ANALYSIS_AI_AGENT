@@ -192,3 +192,48 @@ class CodeParser:
             },
         }
 
+    def extract_context_for_files(
+        self,
+        rel_paths: list,
+        max_chars: int = 200000,
+    ) -> str:
+        """
+        Build a code-context string restricted to the files listed in
+        *rel_paths* (repo-relative POSIX strings, e.g. ``['src/app.py']``).
+
+        Used by incremental scanning so we only feed changed/added files to
+        the agent pipeline while reusing cached findings for the rest.
+        """
+        abs_paths = set()
+        for rp in rel_paths:
+            candidate = self.target_dir / rp
+            if candidate.exists():
+                abs_paths.add(candidate.resolve())
+
+        context_blocks = []
+        total_chars = 0
+
+        for abs_path in sorted(abs_paths):
+            if abs_path.suffix not in SUPPORTED_EXTENSIONS:
+                continue
+            try:
+                with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+
+                if total_chars + len(content) > max_chars:
+                    remaining = max_chars - total_chars
+                    if remaining > 500:
+                        content = content[:remaining] + "\n... [TRUNCATED]"
+                    else:
+                        break
+
+                rel = abs_path.relative_to(self.target_dir)
+                line_count = content.count("\n")
+                context_blocks.append(
+                    f"--- FILE: {rel} ({line_count} lines) ---\n{content}\n"
+                )
+                total_chars += len(content)
+            except Exception:
+                pass
+
+        return "\n".join(context_blocks)
