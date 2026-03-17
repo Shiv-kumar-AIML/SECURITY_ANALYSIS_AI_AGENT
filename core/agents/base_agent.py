@@ -3,6 +3,7 @@ Base Agent class for the multi-agent security analysis system.
 All specialized agents inherit from this class.
 Each agent has: reasoning capability, tool access, shared memory, and structured output.
 """
+import threading
 from typing import Optional, List, Dict
 from ..llm_provider import LLMProvider
 from ..findings import Finding, ScanResult
@@ -15,56 +16,68 @@ class SharedMemory:
     This enables inter-agent knowledge sharing and collaborative reasoning.
     """
 
-    def __init__(self):
+    def __init__(self, max_messages: int = 1000):
         self._store: Dict[str, dict] = {}
         self._messages: List[dict] = []
+        self._lock = threading.RLock()  # Reentrant lock for thread safety
+        self._max_messages = max_messages
 
     def write(self, agent_name: str, key: str, value):
         """Write a piece of knowledge to shared memory."""
-        if agent_name not in self._store:
-            self._store[agent_name] = {}
-        self._store[agent_name][key] = value
+        with self._lock:
+            if agent_name not in self._store:
+                self._store[agent_name] = {}
+            self._store[agent_name][key] = value
 
     def read(self, agent_name: str, key: str = None):
         """Read knowledge from a specific agent's memory."""
-        if key:
-            return self._store.get(agent_name, {}).get(key)
-        return self._store.get(agent_name, {})
+        with self._lock:
+            if key:
+                return self._store.get(agent_name, {}).get(key)
+            return self._store.get(agent_name, {})
 
     def read_all(self) -> Dict[str, dict]:
         """Read all shared knowledge."""
-        return self._store
+        with self._lock:
+            return self._store.copy()  # Return copy to prevent external modification
 
     def send_message(self, from_agent: str, to_agent: str, content: str, msg_type: str = "info"):
         """Send an inter-agent message."""
-        self._messages.append({
-            "from": from_agent,
-            "to": to_agent,
-            "type": msg_type,
-            "content": content,
-        })
+        with self._lock:
+            self._messages.append({
+                "from": from_agent,
+                "to": to_agent,
+                "type": msg_type,
+                "content": content,
+            })
+            # Prevent memory leak by limiting message history
+            if len(self._messages) > self._max_messages:
+                # Keep only the most recent messages
+                self._messages = self._messages[-self._max_messages:]
 
     def get_messages(self, agent_name: str) -> List[dict]:
         """Get all messages addressed to a specific agent."""
-        return [m for m in self._messages if m["to"] == agent_name or m["to"] == "all"]
+        with self._lock:
+            return [m for m in self._messages if m["to"] == agent_name or m["to"] == "all"]
 
     def get_context_summary(self, exclude_agent: str = "") -> str:
         """Generate a context summary from all agents' shared knowledge."""
-        parts = []
-        for agent_name, data in self._store.items():
-            if agent_name == exclude_agent:
-                continue
-            parts.append(f"\n### Knowledge from [{agent_name}]:")
-            for key, value in data.items():
-                if isinstance(value, str):
-                    parts.append(f"**{key}**: {value[:2000]}")
-                elif isinstance(value, list):
-                    parts.append(f"**{key}**: {len(value)} items")
-                    for item in value[:5]:
-                        parts.append(f"  - {str(item)[:200]}")
-                elif isinstance(value, dict):
-                    parts.append(f"**{key}**: {str(value)[:500]}")
-        return "\n".join(parts)
+        with self._lock:
+            parts = []
+            for agent_name, data in self._store.items():
+                if agent_name == exclude_agent:
+                    continue
+                parts.append(f"\n### Knowledge from [{agent_name}]:")
+                for key, value in data.items():
+                    if isinstance(value, str):
+                        parts.append(f"**{key}**: {value[:2000]}")
+                    elif isinstance(value, list):
+                        parts.append(f"**{key}**: {len(value)} items")
+                        for item in value[:5]:
+                            parts.append(f"  - {str(item)[:200]}")
+                    elif isinstance(value, dict):
+                        parts.append(f"**{key}**: {str(value)[:500]}")
+            return "\n".join(parts)
 
 
 class BaseAgent:

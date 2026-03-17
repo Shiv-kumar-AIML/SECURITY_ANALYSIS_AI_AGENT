@@ -174,10 +174,17 @@ class LLMProvider:
             with urllib.request.urlopen(req, timeout=300) as response:
                 result = json.loads(response.read().decode('utf-8'))
 
-                # Track token usage (approximate for Ollama)
-                if "eval_count" in result:
-                    # Ollama provides eval_count which is roughly tokens processed
-                    self.total_tokens += result.get("eval_count", 0)
+                # Track token usage with better estimation
+                output_tokens = result.get("eval_count", 0)
+                
+                # Estimate input tokens (rough approximation: ~4 chars per token)
+                input_text = system + "\n\n" + prompt if system else prompt
+                estimated_input_tokens = len(input_text) // 4
+                
+                # Total tokens = input + output
+                total_tokens = estimated_input_tokens + output_tokens
+                self.total_tokens += total_tokens
+                
                 self.total_calls += 1
 
                 return result.get("response", "")

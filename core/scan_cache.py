@@ -96,32 +96,49 @@ class ScanCache:
 
     def save(self, all_findings: List[Finding]):
         """Persist the full set of current findings to disk."""
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Re-index by relative file path
-        self._findings_by_file = {}
-        for f in all_findings:
-            rel = _rel(f.file_path, self.target_path)
-            self._findings_by_file.setdefault(rel, []).append(f.to_dict())
+            # Re-index by relative file path
+            self._findings_by_file = {}
+            for f in all_findings:
+                rel = _rel(f.file_path, self.target_path)
+                self._findings_by_file.setdefault(rel, []).append(f.to_dict())
 
-        # Refresh file hashes for all supported files
-        self._file_hashes = _compute_file_hashes(self.target_path)
+            # Refresh file hashes for all supported files
+            self._file_hashes = _compute_file_hashes(self.target_path)
 
-        # Record current git commit (if available)
-        if is_git_repo(self.target_path):
-            self._last_commit = get_current_commit(self.target_path)
+            # Record current git commit (if available)
+            if is_git_repo(self.target_path):
+                self._last_commit = get_current_commit(self.target_path)
 
-        state = {
-            "version": self.VERSION,
-            "target_path": self.target_path,
-            "last_commit": self._last_commit,
-            "scan_time": time.time(),
-            "file_hashes": self._file_hashes,
-            "findings_by_file": self._findings_by_file,
-        }
+            state = {
+                "version": self.VERSION,
+                "target_path": self.target_path,
+                "last_commit": self._last_commit,
+                "scan_time": time.time(),
+                "file_hashes": self._file_hashes,
+                "findings_by_file": self._findings_by_file,
+            }
 
-        with open(self._state_file, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
+            # Write to temporary file first, then atomically rename
+            temp_file = self._state_file.with_suffix('.tmp')
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+            
+            # Atomic rename to prevent corruption
+            temp_file.replace(self._state_file)
+            
+        except Exception as e:
+            # Log the error but don't crash the scan
+            import sys
+            print(f"Warning: Failed to save scan cache: {e}", file=sys.stderr)
+            # Try to clean up temp file if it exists
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except:
+                pass
 
     # ── incremental logic ────────────────────────────────────────────────
 
