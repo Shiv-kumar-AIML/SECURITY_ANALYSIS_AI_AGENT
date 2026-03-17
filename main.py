@@ -186,7 +186,7 @@ def print_scan_config(console, target_path, llm_provider, model, tools_only=Fals
     console.print()
 
 
-def print_results_summary(console, scan_result):
+def print_results_summary(console, scan_result, llm_provider=None):
     """Print a beautiful results summary."""
     from core.findings import Severity
     from core.report_generator import ReportGenerator
@@ -237,6 +237,12 @@ def print_results_summary(console, scan_result):
     stats.append(f"{scan_result.total_lines}\n", style="bold")
     stats.append("  Scan Duration:    ", style="dim")
     stats.append(f"{scan_duration:.1f}s\n", style="bold")
+    if llm_provider and hasattr(llm_provider, 'get_token_stats'):
+        token_stats = llm_provider.get_token_stats()
+        stats.append("  LLM Calls:        ", style="dim")
+        stats.append(f"{token_stats['total_calls']}\n", style="bold")
+        stats.append("  Total Tokens:     ", style="dim")
+        stats.append(f"{token_stats['total_tokens']:,}\n", style="bold")
     stats.append("  Risk Score:       ", style="dim")
     risk = scan_result.risk_score
     risk_color = "green" if risk < 3 else "yellow" if risk < 7 else "bright_red"
@@ -518,7 +524,7 @@ def main():
         console.print()
         console.rule("[bold bright_green]Scan Complete[/bold bright_green]")
         console.print()
-        print_results_summary(console, scan_result)
+        print_results_summary(console, scan_result, orchestrator.llm_provider)
     else:
         confirmed = scan_result.get_confirmed()
         print(f"\n[+] Scan complete! {len(confirmed)} confirmed findings.")
