@@ -117,8 +117,19 @@ class ReconAgent(BaseAgent):
             if console:
                 console.print(f"  [cyan]▸[/cyan] Skill: [bold]{skill.replace('.md', '').replace('-', ' ').title()}[/bold]")
 
-            peer_context = self.get_peer_context()
-            response = self.run_skill(skill, code_context, extra_context=peer_context)
+            # Build context from our own shared knowledge (tech stack, tool findings)
+            own_context_parts = []
+            tech_stack = self.read_peer_knowledge("recon_agent", "tech_stack")
+            if tech_stack:
+                own_context_parts.append(f"### Tech Stack Analysis\n{tech_stack}")
+            
+            tool_summary = self.read_peer_knowledge("recon_agent", "tool_findings_summary")
+            if tool_summary:
+                own_context_parts.append(f"### Tool Scanner Findings\n{tool_summary}")
+            
+            own_context = "\n\n".join(own_context_parts) if own_context_parts else ""
+            
+            response = self.run_skill(skill, code_context, extra_context=own_context)
             results[skill] = response
 
             # Share each skill's findings immediately

@@ -116,6 +116,12 @@ class LLMProvider:
                 kwargs["response_format"] = {"type": "json_object"}
 
             response = client.chat.completions.create(**kwargs)
+
+            # Track token usage
+            if hasattr(response, 'usage') and response.usage:
+                self.total_tokens += response.usage.total_tokens
+            self.total_calls += 1
+
             return response.choices[0].message.content or ""
 
         except Exception as e:
@@ -130,6 +136,15 @@ class LLMProvider:
                 prompt,
                 generation_config=genai.types.GenerationConfig(temperature=temperature)
             )
+
+            # Track token usage (approximate)
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                # Gemini provides input/output token counts
+                input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0)
+                output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0)
+                self.total_tokens += input_tokens + output_tokens
+            self.total_calls += 1
+
             return response.text
         except Exception as e:
             raise RuntimeError(f"Gemini API error: {e}")
@@ -158,6 +173,20 @@ class LLMProvider:
         try:
             with urllib.request.urlopen(req, timeout=300) as response:
                 result = json.loads(response.read().decode('utf-8'))
+
+                # Track token usage with better estimation
+                output_tokens = result.get("eval_count", 0)
+                
+                # Estimate input tokens (rough approximation: ~4 chars per token)
+                input_text = system + "\n\n" + prompt if system else prompt
+                estimated_input_tokens = len(input_text) // 4
+                
+                # Total tokens = input + output
+                total_tokens = estimated_input_tokens + output_tokens
+                self.total_tokens += total_tokens
+                
+                self.total_calls += 1
+
                 return result.get("response", "")
         except Exception as e:
             raise RuntimeError(f"Ollama error at {self.host}: {e}. Ensure Ollama is running and model '{self.model}' is pulled.")
@@ -170,3 +199,11 @@ class LLMProvider:
             "ollama": "Local Ollama",
         }
         return names.get(self.llm_provider, self.llm_provider)
+
+    def get_token_stats(self) -> dict:
+        """Get token usage statistics."""
+        return {
+            "total_tokens": self.total_tokens,
+            "total_calls": self.total_calls,
+            "provider": self.llm_provider
+        }

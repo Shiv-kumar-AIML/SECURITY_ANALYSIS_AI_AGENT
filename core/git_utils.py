@@ -31,12 +31,40 @@ def _git_env() -> dict:
 def sanitize_url(url: str) -> str:
     """Removes sensitive credentials from the URL for safe logging."""
     parsed = urlparse(url)
+    
+    # Remove username and password from netloc
     if parsed.username or parsed.password:
         netloc = parsed.hostname
         if parsed.port:
             netloc += f":{parsed.port}"
-        return parsed._replace(netloc=netloc).geturl()
-    return url
+        parsed = parsed._replace(netloc=netloc)
+    
+    # Remove sensitive query parameters
+    if parsed.query:
+        from urllib.parse import parse_qs, urlencode
+        query_params = parse_qs(parsed.query, keep_blank_values=True)
+        
+        # Remove common sensitive parameter names
+        sensitive_params = {
+            'token', 'access_token', 'auth_token', 'api_key', 'apikey', 
+            'password', 'passwd', 'secret', 'key', 'auth', 'credential',
+            'private_token', 'access_token', 'refresh_token'
+        }
+        
+        # Case-insensitive removal
+        filtered_params = {}
+        for param, values in query_params.items():
+            if param.lower() not in sensitive_params:
+                filtered_params[param] = values
+        
+        if filtered_params != query_params:  # Only update if we removed something
+            parsed = parsed._replace(query=urlencode(filtered_params, doseq=True))
+    
+    # Remove fragment (often contains tokens)
+    if parsed.fragment:
+        parsed = parsed._replace(fragment='')
+    
+    return parsed.geturl()
 
 def clone_repo(url: str, dest: Optional[str] = None) -> str:
     """

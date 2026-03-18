@@ -12,6 +12,11 @@ venv/
 .venv/
 env/
 
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # IDE
 .vscode/
 .idea/
@@ -26,6 +31,14 @@ workspace/*
 .env
 *.log
 
+# Local application database/state
+.app_users.db
+
+# Streamlit local secrets
+.streamlit/secrets.toml
+
 # OS
 .DS_Store
 Thumbs.db
+
+.scan_cache/

@@ -3,6 +3,7 @@ Structured Finding model for security vulnerabilities.
 Used across all agents and tools for consistent output format.
 """
 import json
+import math
 import uuid
 import time
 from dataclasses import dataclass, field, asdict
@@ -149,7 +150,49 @@ class ScanResult:
         confirmed = self.get_confirmed()
         if not confirmed:
             return 0.0
-        return sum(f.severity.score * f.confidence for f in confirmed) / len(confirmed)
+
+        # De-duplicate identical findings so repeated detector hits do not inflate risk.
+        unique_findings: List[Finding] = []
+        seen = set()
+        for f in confirmed:
+            key = (f.title, f.file_path, f.line_number, f.end_line, f.severity.value)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_findings.append(f)
+
+        # Many tool findings omit confidence (0.0). Use severity-based fallback confidence
+        # so risk does not collapse to zero when evidence exists.
+        fallback_confidence = {
+            Severity.CRITICAL: 0.95,
+            Severity.HIGH: 0.90,
+            Severity.MEDIUM: 0.80,
+            Severity.LOW: 0.70,
+            Severity.INFO: 0.60,
+        }
+
+        weighted_sum = 0.0
+        confidence_sum = 0.0
+        for finding in unique_findings:
+            conf = finding.confidence
+            if conf <= 0.0:
+                conf = fallback_confidence.get(finding.severity, 0.70)
+            conf = max(0.0, min(1.0, conf))
+
+            weighted_sum += finding.severity.score * conf
+            confidence_sum += conf
+
+        if confidence_sum <= 0.0:
+            return 0.0
+
+        # Base severity weighted by confidence (0..10)
+        base_score = weighted_sum / confidence_sum
+
+        # Volume boost: larger numbers of unique findings should raise overall risk,
+        # but with diminishing returns to keep the score bounded.
+        volume_boost = min(2.0, math.log1p(len(unique_findings)) * 0.8)
+
+        return min(10.0, base_score + volume_boost)
 
     def to_dict(self):
         return {
