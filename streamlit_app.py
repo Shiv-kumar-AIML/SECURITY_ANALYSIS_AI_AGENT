@@ -1191,6 +1191,13 @@ def main() -> None:
 
     env_client_id = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
     cookie_secret = os.getenv("APP_COOKIE_SECRET", "").strip()
+    if not cookie_secret:
+        # Bootstrap a persistent server-side secret so per-device cookies work
+        # even when APP_COOKIE_SECRET is not explicitly configured.
+        cookie_secret = get_app_setting("cookie_secret_internal", "")
+        if not cookie_secret:
+            cookie_secret = secrets.token_urlsafe(48)
+            set_app_setting("cookie_secret_internal", cookie_secret)
     cookie_manager = None
     cookies_supported = False
     if EncryptedCookieManager is not None and cookie_secret:
