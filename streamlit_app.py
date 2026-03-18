@@ -1318,11 +1318,6 @@ def main() -> None:
 
         if users_exist:
             st.subheader("Login")
-            st.caption("An account already exists. You do not need to sign up again.")
-            if cookies_supported:
-                st.caption("Remember this device keeps login private to this browser/device only.")
-            else:
-                st.caption("Persistent device login is disabled. Set APP_COOKIE_SECRET and install streamlit-cookies-manager to enable it.")
             with st.form("login_form", clear_on_submit=False):
                 li_username = st.text_input("Username", key="login_username", value=last_login_username)
                 li_password = st.text_input("Password", type="password", key="login_password")
@@ -1356,7 +1351,6 @@ def main() -> None:
                             st.error(msg)
         else:
             st.subheader("Create account")
-            st.caption("First-time setup: create an account first, then log in.")
             with st.form("signup_form", clear_on_submit=False):
                 su_username = st.text_input("Username")
                 su_password = st.text_input("Password", type="password")
