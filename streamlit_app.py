@@ -29,6 +29,11 @@ import re
 
 import streamlit as st
 
+try:
+    from streamlit_cookies_manager import EncryptedCookieManager
+except Exception:
+    EncryptedCookieManager = None
+
 from core.constants import BASE_DIR, DEFAULT_OPENAI_MODEL, WORKSPACE_DIR
 from core.findings import ScanResult
 from core.orchestrator import SASTOrchestrator
@@ -38,6 +43,8 @@ from core.scan_cache import ScanCache
 
 
 APP_DB_PATH = BASE_DIR / ".app_users.db"
+SESSION_COOKIE_NAME = "secai_device_session"
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 def _strip_rich_markup(text: str) -> str:
@@ -159,9 +166,27 @@ def init_app_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                last_seen_at INTEGER NOT NULL,
+                revoked_at INTEGER DEFAULT 0,
+                user_agent TEXT DEFAULT '',
+                ip_address TEXT DEFAULT '',
+                FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scan_reports_user_time ON scan_reports(user_id, created_at DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_user_repo ON workspace_repos(user_id, repo_full_name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scan_cache_user_repo ON scan_cache_state(user_id, repo_full_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_user ON app_sessions(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash ON app_sessions(token_hash)")
         conn.execute("CREATE VIEW IF NOT EXISTS app_user AS SELECT * FROM app_users")
         conn.execute("CREATE VIEW IF NOT EXISTS scan_cache AS SELECT * FROM scan_cache_state")
         conn.execute("CREATE VIEW IF NOT EXISTS workspace AS SELECT * FROM workspace_repos")
@@ -309,6 +334,81 @@ def validate_user_session(user_id: int, username: str) -> bool:
             (user_id, username.strip().lower()),
         ).fetchone()
     return bool(row)
+
+
+def _hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_persistent_session_token(user_id: int, user_agent: str = "", ip_address: str = "") -> str:
+    """Create a persistent device session token and store only its hash."""
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = _hash_session_token(raw_token)
+    now = int(time.time())
+    expires_at = now + SESSION_TTL_SECONDS
+
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO app_sessions (
+                user_id, token_hash, created_at, expires_at, last_seen_at,
+                revoked_at, user_agent, ip_address
+            ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (user_id, token_hash, now, expires_at, now, user_agent[:512], ip_address[:128]),
+        )
+        conn.commit()
+
+    return raw_token
+
+
+def resolve_user_from_session_token(raw_token: str) -> tuple[int, str] | None:
+    """Validate persistent session token and return (user_id, username) if valid."""
+    if not raw_token:
+        return None
+
+    token_hash = _hash_session_token(raw_token)
+    now = int(time.time())
+
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT s.user_id, u.username
+            FROM app_sessions s
+            JOIN app_users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+              AND s.revoked_at = 0
+              AND s.expires_at > ?
+            LIMIT 1
+            """,
+            (token_hash, now),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        conn.execute(
+            "UPDATE app_sessions SET last_seen_at = ? WHERE token_hash = ?",
+            (now, token_hash),
+        )
+        conn.commit()
+
+    return int(row[0]), str(row[1])
+
+
+def revoke_session_token(raw_token: str) -> None:
+    """Revoke a persistent session token by marking it revoked."""
+    if not raw_token:
+        return
+
+    token_hash = _hash_session_token(raw_token)
+    now = int(time.time())
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute(
+            "UPDATE app_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at = 0",
+            (now, token_hash),
+        )
+        conn.commit()
 
 
 def upsert_workspace_repo(
@@ -1080,6 +1180,19 @@ def main() -> None:
 
     env_client_id = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
     stored_client_id = get_app_setting("github_oauth_client_id", "")
+    cookie_secret = os.getenv("APP_COOKIE_SECRET", "").strip()
+    cookie_manager = None
+    cookies_supported = False
+    if EncryptedCookieManager is not None and cookie_secret:
+        cookie_manager = EncryptedCookieManager(prefix="secai/", password=cookie_secret)
+        if cookie_manager.ready():
+            cookies_supported = True
+        else:
+            st.stop()
+
+    # Security cleanup: clear deprecated global auto-login setting if present.
+    if get_app_setting("auto_login_username", ""):
+        set_app_setting("auto_login_username", "")
     if not st.session_state.github_oauth_client_id:
         if env_client_id:
             st.session_state.github_oauth_client_id = env_client_id
@@ -1089,6 +1202,41 @@ def main() -> None:
     openai_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None
 
+    def _get_request_context() -> tuple[str, str]:
+        """Best-effort extraction of user-agent and client IP from request headers."""
+        user_agent = ""
+        client_ip = ""
+        try:
+            context = getattr(st, "context", None)
+            headers = getattr(context, "headers", None)
+            if headers:
+                user_agent = str(headers.get("User-Agent", "") or "")
+                fwd = str(headers.get("X-Forwarded-For", "") or "")
+                if fwd:
+                    client_ip = fwd.split(",")[0].strip()
+                else:
+                    client_ip = str(headers.get("X-Real-Ip", "") or "")
+        except Exception:
+            pass
+        return user_agent, client_ip
+
+    def get_device_session_cookie() -> str:
+        if not (cookies_supported and cookie_manager):
+            return ""
+        return str(cookie_manager.get(SESSION_COOKIE_NAME, "") or "")
+
+    def set_device_session_cookie(token: str) -> None:
+        if not (cookies_supported and cookie_manager):
+            return
+        cookie_manager[SESSION_COOKIE_NAME] = token
+        cookie_manager.save()
+
+    def clear_device_session_cookie() -> None:
+        if not (cookies_supported and cookie_manager):
+            return
+        cookie_manager[SESSION_COOKIE_NAME] = ""
+        cookie_manager.save()
+
     def load_repos_with_token(token: str) -> None:
         user = get_authenticated_user(token)
         repos = list_user_repos(token)
@@ -1096,7 +1244,7 @@ def main() -> None:
         st.session_state.user_login = user.get("login", "")
         st.session_state.repos = repos
 
-    def complete_app_login(username: str, remember_login: bool = True) -> None:
+    def complete_app_login(username: str, remember_device: bool = False) -> None:
         """Set authenticated session and restore saved GitHub auth if present."""
         uname = username.strip().lower()
         st.session_state.force_show_login_page = False
@@ -1104,7 +1252,17 @@ def main() -> None:
         st.session_state.app_username = uname
         st.session_state.app_user_id = get_app_user_id(uname)
         set_app_setting("last_login_username", uname)
-        set_app_setting("auto_login_username", uname if remember_login else "")
+
+        if remember_device and st.session_state.app_user_id is not None:
+            user_agent, client_ip = _get_request_context()
+            session_token = create_persistent_session_token(
+                user_id=st.session_state.app_user_id,
+                user_agent=user_agent,
+                ip_address=client_ip,
+            )
+            set_device_session_cookie(session_token)
+        elif not remember_device:
+            clear_device_session_cookie()
 
         saved_login, saved_token = load_user_github_auth(uname)
         if saved_token:
@@ -1117,7 +1275,10 @@ def main() -> None:
                 st.session_state.repos = []
 
     def logout_app() -> None:
-        set_app_setting("auto_login_username", "")
+        existing_cookie = get_device_session_cookie()
+        if existing_cookie:
+            revoke_session_token(existing_cookie)
+            clear_device_session_cookie()
         st.session_state.force_show_login_page = False
         st.session_state.app_authenticated = False
         st.session_state.app_username = ""
@@ -1131,28 +1292,40 @@ def main() -> None:
     if not st.session_state.app_authenticated:
         users_exist = app_has_users()
         last_login_username = get_app_setting("last_login_username", "")
-        auto_login_username = get_app_setting("auto_login_username", "").strip().lower()
         force_login_page = bool(st.session_state.force_show_login_page)
 
-        if users_exist and auto_login_username and not force_login_page:
-            if get_app_user_id(auto_login_username) is not None:
-                complete_app_login(auto_login_username, remember_login=True)
-                st.rerun()
-            else:
-                set_app_setting("auto_login_username", "")
+        if users_exist and not force_login_page:
+            existing_cookie = get_device_session_cookie()
+            if existing_cookie:
+                resolved = resolve_user_from_session_token(existing_cookie)
+                if resolved:
+                    _, resolved_username = resolved
+                    complete_app_login(resolved_username, remember_device=True)
+                    st.rerun()
+                else:
+                    clear_device_session_cookie()
 
         if users_exist:
             st.subheader("Login")
             st.caption("An account already exists. You do not need to sign up again.")
+            if cookies_supported:
+                st.caption("Remember this device keeps login private to this browser/device only.")
+            else:
+                st.caption("Persistent device login is disabled. Set APP_COOKIE_SECRET and install streamlit-cookies-manager to enable it.")
             with st.form("login_form", clear_on_submit=False):
                 li_username = st.text_input("Username", key="login_username", value=last_login_username)
                 li_password = st.text_input("Password", type="password", key="login_password")
-                li_remember = st.checkbox("Remember login on this device", value=True, key="login_remember_existing")
+                remember_device = st.checkbox(
+                    "Remember this device",
+                    value=True,
+                    key="remember_device_login_existing",
+                    disabled=not cookies_supported,
+                )
                 li_submit = st.form_submit_button("Login", use_container_width=True)
                 if li_submit:
                     ok, msg = authenticate_app_user(li_username, li_password)
                     if ok:
-                        complete_app_login(li_username, remember_login=li_remember)
+                        complete_app_login(li_username, remember_device=bool(remember_device and cookies_supported))
 
                         st.success(msg)
                         st.rerun()
@@ -1188,12 +1361,17 @@ def main() -> None:
             with st.form("login_form", clear_on_submit=False):
                 li_username = st.text_input("Username", key="login_username", value=last_login_username)
                 li_password = st.text_input("Password", type="password", key="login_password")
-                li_remember = st.checkbox("Remember login on this device", value=True, key="login_remember_firsttime")
+                remember_device = st.checkbox(
+                    "Remember this device",
+                    value=True,
+                    key="remember_device_login_firsttime",
+                    disabled=not cookies_supported,
+                )
                 li_submit = st.form_submit_button("Login", use_container_width=True)
                 if li_submit:
                     ok, msg = authenticate_app_user(li_username, li_password)
                     if ok:
-                        complete_app_login(li_username, remember_login=li_remember)
+                        complete_app_login(li_username, remember_device=bool(remember_device and cookies_supported))
 
                         st.success(msg)
                         st.rerun()
