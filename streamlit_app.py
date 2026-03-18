@@ -23,6 +23,7 @@ import textwrap
 import time
 import urllib.parse
 import urllib.request
+import warnings
 from pathlib import Path
 from typing import Callable
 import re
@@ -30,7 +31,15 @@ import re
 import streamlit as st
 
 try:
-    from streamlit_cookies_manager import EncryptedCookieManager
+    # streamlit-cookies-manager still uses legacy st.cache internally.
+    # Filter that third-party deprecation warning to keep app logs clean.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"st\.cache is deprecated and will be removed soon.*",
+            category=DeprecationWarning,
+        )
+        from streamlit_cookies_manager import EncryptedCookieManager
 except Exception:
     EncryptedCookieManager = None
 
@@ -1154,6 +1163,8 @@ def main() -> None:
         st.session_state.github_oauth_client_id = ""
     if "force_show_login_page" not in st.session_state:
         st.session_state.force_show_login_page = False
+    if "last_login_username_local" not in st.session_state:
+        st.session_state.last_login_username_local = ""
 
     if st.session_state.app_authenticated:
         top_nav_col, _ = st.columns([1, 20])
@@ -1179,7 +1190,6 @@ def main() -> None:
     st.caption("Create platform account once, connect GitHub once, and start scans without repeated OAuth prompts.")
 
     env_client_id = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
-    stored_client_id = get_app_setting("github_oauth_client_id", "")
     cookie_secret = os.getenv("APP_COOKIE_SECRET", "").strip()
     cookie_manager = None
     cookies_supported = False
@@ -1193,11 +1203,12 @@ def main() -> None:
     # Security cleanup: clear deprecated global auto-login setting if present.
     if get_app_setting("auto_login_username", ""):
         set_app_setting("auto_login_username", "")
+    # Security cleanup: remove shared username memory if present.
+    if get_app_setting("last_login_username", ""):
+        set_app_setting("last_login_username", "")
     if not st.session_state.github_oauth_client_id:
         if env_client_id:
             st.session_state.github_oauth_client_id = env_client_id
-        elif stored_client_id:
-            st.session_state.github_oauth_client_id = stored_client_id
 
     openai_key = os.getenv("OPENAI_API_KEY", "").strip()
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None
@@ -1251,7 +1262,7 @@ def main() -> None:
         st.session_state.app_authenticated = True
         st.session_state.app_username = uname
         st.session_state.app_user_id = get_app_user_id(uname)
-        set_app_setting("last_login_username", uname)
+        st.session_state.last_login_username_local = uname
 
         if remember_device and st.session_state.app_user_id is not None:
             user_agent, client_ip = _get_request_context()
@@ -1291,7 +1302,7 @@ def main() -> None:
 
     if not st.session_state.app_authenticated:
         users_exist = app_has_users()
-        last_login_username = get_app_setting("last_login_username", "")
+        last_login_username = str(st.session_state.last_login_username_local or "")
         force_login_page = bool(st.session_state.force_show_login_page)
 
         if users_exist and not force_login_page:
@@ -1405,10 +1416,6 @@ def main() -> None:
         ).strip()
         if entered_client_id != st.session_state.github_oauth_client_id:
             st.session_state.github_oauth_client_id = entered_client_id
-
-        # Persist once so user does not need to enter it again.
-        if st.session_state.github_oauth_client_id:
-            set_app_setting("github_oauth_client_id", st.session_state.github_oauth_client_id)
 
         client_id = st.session_state.github_oauth_client_id
         if not client_id:
