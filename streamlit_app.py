@@ -176,9 +176,9 @@ def create_app_user(username: str, password: str) -> tuple[bool, str]:
     """Create a local platform user."""
     username = username.strip().lower()
     if len(username) < 3:
-        return False, "Username minimum 3 characters hona chahiye."
+        return False, "Username must be at least 3 characters long."
     if len(password) < 8:
-        return False, "Password minimum 8 characters hona chahiye."
+        return False, "Password must be at least 8 characters long."
 
     salt = secrets.token_hex(16)
     pwd_hash = _hash_password(password, salt)
@@ -194,9 +194,9 @@ def create_app_user(username: str, password: str) -> tuple[bool, str]:
                 (username, pwd_hash, salt, now, now),
             )
             conn.commit()
-        return True, "Signup successful. Ab login karein."
+        return True, "Signup successful. Please log in."
     except sqlite3.IntegrityError:
-        return False, "Ye username already exists."
+        return False, "This username already exists."
 
 
 def authenticate_app_user(username: str, password: str) -> tuple[bool, str]:
@@ -1034,9 +1034,6 @@ def main() -> None:
     )
     init_app_db()
 
-    st.title("Security Analysis Agent")
-    st.caption("Create platform account once, connect GitHub once, and start scans without repeated OAuth prompts.")
-
     if "app_authenticated" not in st.session_state:
         st.session_state.app_authenticated = False
     if "app_username" not in st.session_state:
@@ -1055,6 +1052,31 @@ def main() -> None:
         st.session_state.device_flow = {}
     if "github_oauth_client_id" not in st.session_state:
         st.session_state.github_oauth_client_id = ""
+    if "force_show_login_page" not in st.session_state:
+        st.session_state.force_show_login_page = False
+
+    if st.session_state.app_authenticated:
+        top_nav_col, _ = st.columns([1, 20])
+        with top_nav_col:
+            if st.button("←", key="back_top_nav", help="Back"):
+                if st.session_state.selected_repo_full_name:
+                    # Step 3 -> repository list
+                    st.session_state.selected_repo_full_name = ""
+                else:
+                    # Repository home -> login page
+                    st.session_state.force_show_login_page = True
+                    st.session_state.app_authenticated = False
+                    st.session_state.app_username = ""
+                    st.session_state.app_user_id = None
+                    st.session_state.github_token = ""
+                    st.session_state.user_login = ""
+                    st.session_state.repos = []
+                    st.session_state.selected_repo_full_name = ""
+                    st.session_state.device_flow = {}
+                st.rerun()
+
+    st.title("Security Analysis Agent")
+    st.caption("Create platform account once, connect GitHub once, and start scans without repeated OAuth prompts.")
 
     env_client_id = os.getenv("GITHUB_OAUTH_CLIENT_ID", "").strip()
     stored_client_id = get_app_setting("github_oauth_client_id", "")
@@ -1077,6 +1099,7 @@ def main() -> None:
     def complete_app_login(username: str, remember_login: bool = True) -> None:
         """Set authenticated session and restore saved GitHub auth if present."""
         uname = username.strip().lower()
+        st.session_state.force_show_login_page = False
         st.session_state.app_authenticated = True
         st.session_state.app_username = uname
         st.session_state.app_user_id = get_app_user_id(uname)
@@ -1095,6 +1118,7 @@ def main() -> None:
 
     def logout_app() -> None:
         set_app_setting("auto_login_username", "")
+        st.session_state.force_show_login_page = False
         st.session_state.app_authenticated = False
         st.session_state.app_username = ""
         st.session_state.app_user_id = None
@@ -1108,8 +1132,9 @@ def main() -> None:
         users_exist = app_has_users()
         last_login_username = get_app_setting("last_login_username", "")
         auto_login_username = get_app_setting("auto_login_username", "").strip().lower()
+        force_login_page = bool(st.session_state.force_show_login_page)
 
-        if users_exist and auto_login_username:
+        if users_exist and auto_login_username and not force_login_page:
             if get_app_user_id(auto_login_username) is not None:
                 complete_app_login(auto_login_username, remember_login=True)
                 st.rerun()
@@ -1118,7 +1143,7 @@ def main() -> None:
 
         if users_exist:
             st.subheader("Step 1: Login")
-            st.caption("Account already created hai. Sign up dubara required nahi hai.")
+            st.caption("An account already exists. You do not need to sign up again.")
             with st.form("login_form", clear_on_submit=False):
                 li_username = st.text_input("Username", key="login_username", value=last_login_username)
                 li_password = st.text_input("Password", type="password", key="login_password")
@@ -1147,7 +1172,7 @@ def main() -> None:
                             st.error(msg)
         else:
             st.subheader("Step 1: Create account")
-            st.caption("First time setup: pehle account create karein, phir login karein.")
+            st.caption("First-time setup: create an account first, then log in.")
             with st.form("signup_form", clear_on_submit=False):
                 su_username = st.text_input("Username")
                 su_password = st.text_input("Password", type="password")
@@ -1198,7 +1223,7 @@ def main() -> None:
         entered_client_id = st.text_input(
             "GitHub OAuth Client ID",
             value=st.session_state.github_oauth_client_id,
-            help="GitHub OAuth app ka client id daalein.",
+            help="Enter your GitHub OAuth app client ID.",
         ).strip()
         if entered_client_id != st.session_state.github_oauth_client_id:
             st.session_state.github_oauth_client_id = entered_client_id
@@ -1209,8 +1234,8 @@ def main() -> None:
 
         client_id = st.session_state.github_oauth_client_id
         if not client_id:
-            st.warning("OAuth Client ID required hai.")
-            st.info("Client ID ko env me bhi set kar sakte hain: GITHUB_OAUTH_CLIENT_ID")
+            st.warning("OAuth Client ID is required.")
+            st.info("You can also set the client ID via env: GITHUB_OAUTH_CLIENT_ID")
             return
 
         if st.button("Login with GitHub", type="primary", use_container_width=True):
@@ -1235,7 +1260,7 @@ def main() -> None:
                     st.session_state.user_login,
                     token,
                 )
-                st.success("GitHub connected. Next login se dubara OAuth nahi maangega.")
+                st.success("GitHub connected. OAuth will not be required again on next login.")
                 st.rerun()
             except Exception as exc:
                 st.error(f"GitHub login failed: {exc}")
@@ -1279,7 +1304,7 @@ def main() -> None:
     else:
         selected_bulk_ids: list[int] = []
         with st.expander("Select Reports For Bulk Delete"):
-            st.caption("Checkbox se reports select karein. Fir niche Delete button use karein.")
+            st.caption("Select reports with checkboxes, then use the delete button below.")
             for report_row in history:
                 report_id = int(report_row.get("id") or 0)
                 created_ts = int(report_row.get("created_at") or 0)
@@ -1316,7 +1341,7 @@ def main() -> None:
                             st.session_state.pop("bulk_delete_confirm_checkbox", None)
                             st.success(f"Deleted {deleted_count} report(s).")
                             st.rerun()
-                        st.warning("Selected reports delete nahi huye. Please refresh and try again.")
+                        st.warning("Selected reports were not deleted. Please refresh and try again.")
             else:
                 st.caption("No reports selected.")
 
@@ -1371,7 +1396,7 @@ def main() -> None:
                             st.success("Report deleted.")
                             st.rerun()
                         else:
-                            st.warning("Report delete nahi hua. Please refresh and try again.")
+                            st.warning("The report was not deleted. Please refresh and try again.")
 
                 if md_content.strip():
                     st.markdown("**Markdown Preview**")
@@ -1391,16 +1416,24 @@ def main() -> None:
 
     if not selected_name:
         st.subheader("Choose repository")
-        repo_search = st.text_input("Search repository", value="")
-        filtered = repos
-        if repo_search.strip():
-            needle = repo_search.strip().lower()
-            filtered = [r for r in repos if needle in str(r.get("full_name", "")).lower()]
 
-        st.caption("Repository par click karein. Fir scan options screen open hogi.")
-        cols = st.columns(3)
-        for idx, repo in enumerate(filtered):
-            with cols[idx % 3]:
+        repo_names = sorted(str(r.get("full_name", "")) for r in repos if str(r.get("full_name", "")))
+        picked_repo = st.selectbox(
+            "Search repository",
+            options=repo_names,
+            index=None,
+            placeholder="Start typing ",
+            key="repo_search_picker",
+            help="Type in this field to filter repository suggestions.",
+        )
+        if picked_repo:
+            st.session_state.selected_repo_full_name = picked_repo
+            st.rerun()
+
+        st.caption("All repositories are shown below. You can also use the search dropdown above.")
+        cols = st.columns(2)
+        for idx, repo in enumerate(repos):
+            with cols[idx % 2]:
                 full_name = str(repo.get("full_name", ""))
                 private_tag = "Private" if repo.get("private") else "Public"
                 st.markdown(f"**{full_name}**")
@@ -1408,8 +1441,6 @@ def main() -> None:
                 if st.button("Open", key=f"open_repo_{full_name}", use_container_width=True):
                     st.session_state.selected_repo_full_name = full_name
                     st.rerun()
-        if not filtered:
-            st.warning("No repositories match your search.")
         return
 
     selected_repo = next((r for r in repos if r.get("full_name") == selected_name), None)
@@ -1418,7 +1449,20 @@ def main() -> None:
         st.rerun()
 
     st.subheader(f"Step 3: Scan options - {selected_name}")
-    openai_model = st.text_input("Model", value=os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL))
+    model_options = [
+        "gpt-4.1-nano",
+        "gpt-4.1-mini",
+        "gpt-4.1",
+        "gpt-4o-mini",
+        "gpt-4o",
+    ]
+    st.caption("Recommended: `gpt-4.1-nano`")
+    openai_model = st.selectbox(
+        "Model",
+        options=model_options,
+        index=0,
+        help="Select the model to run security analysis.",
+    )
     default_mode = _env_default_scan_mode()
     scan_mode = st.radio(
         "Scan mode",
@@ -1437,7 +1481,7 @@ def main() -> None:
         return
 
     if not openai_key:
-        st.error("OPENAI_API_KEY server env me set hona chahiye. UI me key input disabled hai.")
+        st.error("OPENAI_API_KEY must be set in server environment variables. Key input is disabled in the UI.")
         return
 
     # Strong ownership guard: selected repo must exist in current user's GitHub repo listing.
