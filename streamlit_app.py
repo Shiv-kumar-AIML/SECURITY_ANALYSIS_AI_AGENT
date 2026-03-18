@@ -482,6 +482,76 @@ def get_scan_report_for_user(user_id: int, report_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def delete_scan_report_for_user(user_id: int, report_id: int) -> bool:
+    """Delete exactly one report owned by the requesting user."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM scan_reports WHERE id = ? AND user_id = ?",
+            (report_id, user_id),
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_scan_reports_for_user(user_id: int, report_ids: list[int]) -> int:
+    """Delete selected reports for a user and return deleted row count."""
+    cleaned_ids = sorted({int(rid) for rid in report_ids if int(rid) > 0})
+    if not cleaned_ids:
+        return 0
+
+    placeholders = ", ".join(["?"] * len(cleaned_ids))
+    query = f"DELETE FROM scan_reports WHERE user_id = ? AND id IN ({placeholders})"
+
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        cursor = conn.execute(query, [user_id, *cleaned_ids])
+        conn.commit()
+    return int(cursor.rowcount or 0)
+
+
+def _has_reports_for_repo(user_id: int, repo_full_name: str) -> bool:
+    """Return True if user still has at least one report for the repo."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM scan_reports WHERE user_id = ? AND repo_full_name = ? LIMIT 1",
+            (user_id, repo_full_name),
+        ).fetchone()
+    return bool(row)
+
+
+def _clear_incremental_cache_for_repo_path(target_path: str) -> None:
+    """Delete persisted incremental cache directory for a target path."""
+    try:
+        cache = ScanCache(target_path)
+        if cache._cache_dir.exists():
+            shutil.rmtree(cache._cache_dir, ignore_errors=True)
+    except Exception:
+        # Cache cleanup should never break user actions like report deletion.
+        pass
+
+
+def cleanup_repo_scan_state_if_no_reports(user_id: int, repo_full_name: str) -> None:
+    """If repo has no remaining reports for user, clear DB cache metadata and file cache."""
+    if _has_reports_for_repo(user_id, repo_full_name):
+        return
+
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM scan_cache_state WHERE user_id = ? AND repo_full_name = ?",
+            (user_id, repo_full_name),
+        )
+        row = conn.execute(
+            "SELECT clone_path FROM workspace_repos WHERE user_id = ? AND repo_full_name = ?",
+            (user_id, repo_full_name),
+        ).fetchone()
+        conn.commit()
+
+    if row and row[0]:
+        _clear_incremental_cache_for_repo_path(str(row[0]))
+    else:
+        guessed_repo_path = WORKSPACE_DIR / repo_full_name.replace("/", "__")
+        _clear_incremental_cache_for_repo_path(str(guessed_repo_path))
+
+
 def _github_get(token: str, endpoint: str, params: dict | None = None) -> dict | list:
     """Call GitHub REST API with bearer token authentication."""
     query = ""
@@ -1153,6 +1223,49 @@ def main() -> None:
     if not history:
         st.caption("No previous reports yet.")
     else:
+        selected_bulk_ids: list[int] = []
+        with st.expander("Select Reports For Bulk Delete"):
+            st.caption("Checkbox se reports select karein. Fir niche Delete button use karein.")
+            for report_row in history:
+                report_id = int(report_row.get("id") or 0)
+                created_ts = int(report_row.get("created_at") or 0)
+                created_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(created_ts))
+                label = (
+                    f"#{report_id} | {report_row.get('repo_full_name', '')} | "
+                    f"{str(report_row.get('status', '')).upper()} | {created_text}"
+                )
+                if st.checkbox(label, key=f"bulk_select_report_{report_id}"):
+                    selected_bulk_ids.append(report_id)
+
+            if selected_bulk_ids:
+                st.info(f"Selected reports: {len(selected_bulk_ids)}")
+                confirm_bulk_delete = st.checkbox(
+                    "I understand selected reports will be permanently deleted",
+                    key="bulk_delete_confirm_checkbox",
+                )
+                if st.button("Delete Selected Reports", type="secondary", use_container_width=True):
+                    if not confirm_bulk_delete:
+                        st.warning("Please confirm permanent deletion.")
+                    else:
+                        selected_repo_names = {
+                            str(r.get("repo_full_name", ""))
+                            for r in history
+                            if int(r.get("id") or 0) in set(selected_bulk_ids)
+                        }
+                        deleted_count = delete_scan_reports_for_user(st.session_state.app_user_id, selected_bulk_ids)
+                        if deleted_count > 0:
+                            for repo_name in selected_repo_names:
+                                if repo_name:
+                                    cleanup_repo_scan_state_if_no_reports(st.session_state.app_user_id, repo_name)
+                            for deleted_id in selected_bulk_ids:
+                                st.session_state.pop(f"bulk_select_report_{deleted_id}", None)
+                            st.session_state.pop("bulk_delete_confirm_checkbox", None)
+                            st.success(f"Deleted {deleted_count} report(s).")
+                            st.rerun()
+                        st.warning("Selected reports delete nahi huye. Please refresh and try again.")
+            else:
+                st.caption("No reports selected.")
+
         for idx, report_row in enumerate(history, start=1):
             secured_report = get_scan_report_for_user(st.session_state.app_user_id, int(report_row.get("id") or 0))
             if not secured_report:
@@ -1177,14 +1290,34 @@ def main() -> None:
                 lines = md_content.splitlines()
                 preview_text = "\n".join(lines[:80])
 
-                st.download_button(
-                    "Download MD Preview (DB)",
-                    data=preview_text.encode("utf-8"),
-                    file_name=f"scan_report_preview_{secured_report.get('id')}.md",
-                    mime="text/markdown",
-                    key=f"dl_md_preview_{secured_report.get('id')}",
-                    use_container_width=True,
-                )
+                actions_left, actions_right = st.columns(2)
+                with actions_left:
+                    st.download_button(
+                        "Download MD Preview (DB)",
+                        data=preview_text.encode("utf-8"),
+                        file_name=f"scan_report_preview_{secured_report.get('id')}.md",
+                        mime="text/markdown",
+                        key=f"dl_md_preview_{secured_report.get('id')}",
+                        use_container_width=True,
+                    )
+                with actions_right:
+                    if st.button(
+                        "Delete This Report",
+                        key=f"delete_report_{secured_report.get('id')}",
+                        use_container_width=True,
+                    ):
+                        repo_name_for_delete = str(secured_report.get("repo_full_name", ""))
+                        removed = delete_scan_report_for_user(
+                            st.session_state.app_user_id,
+                            int(secured_report.get("id") or 0),
+                        )
+                        if removed:
+                            if repo_name_for_delete:
+                                cleanup_repo_scan_state_if_no_reports(st.session_state.app_user_id, repo_name_for_delete)
+                            st.success("Report deleted.")
+                            st.rerun()
+                        else:
+                            st.warning("Report delete nahi hua. Please refresh and try again.")
 
                 if md_content.strip():
                     st.markdown("**Markdown Preview**")
