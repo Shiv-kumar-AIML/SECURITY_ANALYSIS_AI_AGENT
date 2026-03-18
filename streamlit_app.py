@@ -71,6 +71,7 @@ class StreamlitScanConsole:
 def init_app_db() -> None:
     """Create app auth database if missing."""
     with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS app_users (
@@ -94,6 +95,73 @@ def init_app_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_repos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                repo_full_name TEXT NOT NULL,
+                clone_path TEXT NOT NULL,
+                last_scan_mode TEXT DEFAULT '',
+                last_model_name TEXT DEFAULT '',
+                last_scan_status TEXT DEFAULT '',
+                last_scanned_at INTEGER DEFAULT 0,
+                total_scans INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(user_id, repo_full_name),
+                FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scan_cache_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                repo_full_name TEXT NOT NULL,
+                last_commit TEXT DEFAULT '',
+                changed_count INTEGER DEFAULT 0,
+                added_count INTEGER DEFAULT 0,
+                deleted_count INTEGER DEFAULT 0,
+                cache_hit INTEGER DEFAULT 0,
+                last_scan_at INTEGER DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(user_id, repo_full_name),
+                FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scan_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                repo_full_name TEXT NOT NULL,
+                scan_mode TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                findings_count INTEGER DEFAULT 0,
+                risk_score REAL DEFAULT 0,
+                report_md_path TEXT DEFAULT '',
+                report_pdf_path TEXT DEFAULT '',
+                report_md_content TEXT DEFAULT '',
+                report_pdf_blob BLOB,
+                scan_logs TEXT DEFAULT '',
+                error_message TEXT DEFAULT '',
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES app_users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scan_reports_user_time ON scan_reports(user_id, created_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_user_repo ON workspace_repos(user_id, repo_full_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_scan_cache_user_repo ON scan_cache_state(user_id, repo_full_name)")
+        conn.execute("CREATE VIEW IF NOT EXISTS app_user AS SELECT * FROM app_users")
+        conn.execute("CREATE VIEW IF NOT EXISTS scan_cache AS SELECT * FROM scan_cache_state")
+        conn.execute("CREATE VIEW IF NOT EXISTS workspace AS SELECT * FROM workspace_repos")
         conn.commit()
 
 
@@ -214,6 +282,201 @@ def set_app_setting(key: str, value: str) -> None:
             (key, value, now),
         )
         conn.commit()
+
+
+def get_app_user_id(username: str) -> int | None:
+    """Resolve app username to primary key id."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        row = conn.execute("SELECT id FROM app_users WHERE username = ?", (username.strip().lower(),)).fetchone()
+    return int(row[0]) if row else None
+
+
+def validate_user_session(user_id: int, username: str) -> bool:
+    """Ensure session user_id belongs to the same username in DB."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM app_users WHERE id = ? AND username = ?",
+            (user_id, username.strip().lower()),
+        ).fetchone()
+    return bool(row)
+
+
+def upsert_workspace_repo(
+    user_id: int,
+    repo_full_name: str,
+    clone_path: str,
+    scan_mode: str,
+    model_name: str,
+    status: str,
+) -> None:
+    """Track per-user cloned workspace repository and latest scan metadata."""
+    now = int(time.time())
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO workspace_repos (
+                user_id, repo_full_name, clone_path,
+                last_scan_mode, last_model_name, last_scan_status,
+                last_scanned_at, total_scans, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(user_id, repo_full_name) DO UPDATE SET
+                clone_path = excluded.clone_path,
+                last_scan_mode = excluded.last_scan_mode,
+                last_model_name = excluded.last_model_name,
+                last_scan_status = excluded.last_scan_status,
+                last_scanned_at = excluded.last_scanned_at,
+                total_scans = workspace_repos.total_scans + 1,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                repo_full_name,
+                clone_path,
+                scan_mode,
+                model_name,
+                status,
+                now,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def upsert_scan_cache_state(
+    user_id: int,
+    repo_full_name: str,
+    last_commit: str,
+    changed_count: int,
+    added_count: int,
+    deleted_count: int,
+    cache_hit: bool,
+) -> None:
+    """Persist incremental scan cache metadata per user/repo."""
+    now = int(time.time())
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO scan_cache_state (
+                user_id, repo_full_name, last_commit,
+                changed_count, added_count, deleted_count,
+                cache_hit, last_scan_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, repo_full_name) DO UPDATE SET
+                last_commit = excluded.last_commit,
+                changed_count = excluded.changed_count,
+                added_count = excluded.added_count,
+                deleted_count = excluded.deleted_count,
+                cache_hit = excluded.cache_hit,
+                last_scan_at = excluded.last_scan_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                repo_full_name,
+                last_commit,
+                changed_count,
+                added_count,
+                deleted_count,
+                1 if cache_hit else 0,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def save_scan_report(
+    user_id: int,
+    repo_full_name: str,
+    scan_mode: str,
+    model_name: str,
+    status: str,
+    findings_count: int,
+    risk_score: float,
+    report_md_path: str,
+    report_pdf_path: str,
+    report_md_content: str,
+    report_pdf_blob: bytes | None,
+    scan_logs: str,
+    error_message: str,
+    started_at: int,
+    finished_at: int,
+) -> None:
+    """Store complete scan output for historical per-user report view."""
+    now = int(time.time())
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO scan_reports (
+                user_id, repo_full_name, scan_mode, model_name,
+                status, findings_count, risk_score,
+                report_md_path, report_pdf_path,
+                report_md_content, report_pdf_blob,
+                scan_logs, error_message,
+                started_at, finished_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                repo_full_name,
+                scan_mode,
+                model_name,
+                status,
+                findings_count,
+                risk_score,
+                report_md_path,
+                report_pdf_path,
+                report_md_content,
+                report_pdf_blob,
+                scan_logs,
+                error_message,
+                started_at,
+                finished_at,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def list_scan_reports_for_user(user_id: int, limit: int = 25) -> list[dict]:
+    """Fetch recent scan reports for a user with metadata and downloadable content."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, repo_full_name, scan_mode, model_name, status,
+                   findings_count, risk_score,
+                   report_md_path, report_pdf_path,
+                   report_md_content, report_pdf_blob,
+                   scan_logs, error_message, started_at, finished_at, created_at
+            FROM scan_reports
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_scan_report_for_user(user_id: int, report_id: int) -> dict | None:
+    """Fetch one report strictly scoped to the requesting user."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT id, repo_full_name, scan_mode, model_name, status,
+                   findings_count, risk_score,
+                   report_md_path, report_pdf_path,
+                   report_md_content, report_pdf_blob,
+                   scan_logs, error_message, started_at, finished_at, created_at
+            FROM scan_reports
+            WHERE id = ? AND user_id = ?
+            """,
+            (report_id, user_id),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def _github_get(token: str, endpoint: str, params: dict | None = None) -> dict | list:
@@ -627,6 +890,8 @@ def main() -> None:
         st.session_state.app_authenticated = False
     if "app_username" not in st.session_state:
         st.session_state.app_username = ""
+    if "app_user_id" not in st.session_state:
+        st.session_state.app_user_id = None
     if "repos" not in st.session_state:
         st.session_state.repos = []
     if "user_login" not in st.session_state:
@@ -661,6 +926,7 @@ def main() -> None:
     def logout_app() -> None:
         st.session_state.app_authenticated = False
         st.session_state.app_username = ""
+        st.session_state.app_user_id = None
         st.session_state.github_token = ""
         st.session_state.user_login = ""
         st.session_state.repos = []
@@ -694,6 +960,7 @@ def main() -> None:
                         uname = li_username.strip().lower()
                         st.session_state.app_authenticated = True
                         st.session_state.app_username = uname
+                        st.session_state.app_user_id = get_app_user_id(uname)
 
                         saved_login, saved_token = load_user_github_auth(uname)
                         if saved_token:
@@ -716,6 +983,17 @@ def main() -> None:
     if top2.button("Logout", use_container_width=True):
         logout_app()
         st.rerun()
+
+    if st.session_state.app_user_id is None:
+        st.session_state.app_user_id = get_app_user_id(st.session_state.app_username)
+    if st.session_state.app_user_id is None:
+        st.error("User record missing. Please login again.")
+        logout_app()
+        return
+    if not validate_user_session(st.session_state.app_user_id, st.session_state.app_username):
+        st.error("Session validation failed. Please login again.")
+        logout_app()
+        return
 
     if not st.session_state.github_token:
         st.subheader("Step 2: Connect GitHub")
@@ -795,6 +1073,61 @@ def main() -> None:
         st.rerun()
 
     selected_name = st.session_state.selected_repo_full_name
+
+    st.subheader("Previous Scan Reports")
+    history = list_scan_reports_for_user(st.session_state.app_user_id, limit=20)
+    if not history:
+        st.caption("No previous reports yet.")
+    else:
+        for idx, report_row in enumerate(history, start=1):
+            secured_report = get_scan_report_for_user(st.session_state.app_user_id, int(report_row.get("id") or 0))
+            if not secured_report:
+                continue
+
+            created_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(report_row.get("created_at") or 0)))
+            status = str(report_row.get("status", ""))
+            title = (
+                f"{idx}. {report_row.get('repo_full_name', '')} | "
+                f"{status.upper()} | findings: {report_row.get('findings_count', 0)} | {created_text}"
+            )
+            with st.expander(title):
+                st.write(f"Model: `{secured_report.get('model_name', '')}`")
+                st.write(f"Mode: `{secured_report.get('scan_mode', '')}`")
+                st.write(f"Risk Score: `{float(secured_report.get('risk_score') or 0):.2f}`")
+                if secured_report.get("error_message"):
+                    st.error(str(secured_report.get("error_message")))
+
+                md_content = str(secured_report.get("report_md_content") or "")
+                logs = str(secured_report.get("scan_logs") or "")
+
+                lines = md_content.splitlines()
+                preview_text = "\n".join(lines[:80])
+
+                st.download_button(
+                    "Download MD Preview (DB)",
+                    data=preview_text.encode("utf-8"),
+                    file_name=f"scan_report_preview_{secured_report.get('id')}.md",
+                    mime="text/markdown",
+                    key=f"dl_md_preview_{secured_report.get('id')}",
+                    use_container_width=True,
+                )
+
+                if md_content.strip():
+                    st.markdown("**Markdown Preview**")
+                    preview_key = f"preview_md_{secured_report.get('id')}"
+                    if st.checkbox("Show full markdown report", key=preview_key):
+                        st.markdown(md_content)
+                    else:
+                        lines = md_content.splitlines()
+                        preview_text = "\n".join(lines[:80])
+                        st.markdown(preview_text)
+                        if len(lines) > 80:
+                            st.caption("Preview truncated. Enable full view to see complete report.")
+
+                if logs:
+                    st.markdown("**Stored Logs**")
+                    st.code(logs, language="bash")
+
     if not selected_name:
         st.subheader("Choose repository")
         repo_search = st.text_input("Search repository", value="")
@@ -846,6 +1179,13 @@ def main() -> None:
         st.error("OPENAI_API_KEY server env me set hona chahiye. UI me key input disabled hai.")
         return
 
+    # Strong ownership guard: selected repo must exist in current user's GitHub repo listing.
+    allowed_repo_names = {str(r.get("full_name", "")) for r in repos}
+    if selected_name not in allowed_repo_names:
+        st.error("Access denied: selected repository is not in current user's repository list.")
+        st.session_state.selected_repo_full_name = ""
+        return
+
     incremental = scan_mode == "incremental"
     progress_placeholder = st.empty()
     st.markdown("### Live Scan Logs")
@@ -865,6 +1205,7 @@ def main() -> None:
         emit_log(f"[*] {message}")
 
     try:
+        scan_started_at = int(time.time())
         emit_log("[+] Scan initiated")
         emit_log(f"[+] Target repository: {selected_name}")
         emit_log(f"[+] Scan mode: {'incremental' if incremental else 'full'}")
@@ -872,6 +1213,15 @@ def main() -> None:
         with st.spinner("Preparing repository..."):
             local_repo = clone_or_update_repo(selected_repo, st.session_state.github_token, incremental=incremental)
             emit_log(f"[+] Repository ready: {local_repo}")
+
+        upsert_workspace_repo(
+            user_id=st.session_state.app_user_id,
+            repo_full_name=selected_name,
+            clone_path=str(local_repo),
+            scan_mode="incremental" if incremental else "full",
+            model_name=openai_model,
+            status="running",
+        )
 
         with st.spinner("Running security scan..."):
             md_path, pdf_path, scan_result = _run_scan_pipeline(
@@ -895,28 +1245,97 @@ def main() -> None:
             st.warning("PDF generation skipped because `reportlab` is not installed.")
 
         md_bytes = md_path.read_bytes()
-        pdf_bytes = pdf_path.read_bytes() if pdf_path else b""
-        d1, d2 = st.columns(2)
-        d1.download_button(
-            "Download Markdown",
-            data=md_bytes,
-            file_name=md_path.name,
+        md_lines = md_bytes.decode("utf-8", errors="ignore").splitlines()
+        md_preview = "\n".join(md_lines[:80]).encode("utf-8")
+        st.download_button(
+            "Download MD Preview",
+            data=md_preview,
+            file_name=f"preview_{md_path.name}",
             mime="text/markdown",
             use_container_width=True,
         )
-        if pdf_path:
-            d2.download_button(
-                "Download PDF",
-                data=pdf_bytes,
-                file_name=pdf_path.name,
-                mime="application/pdf",
-                use_container_width=True,
-            )
 
         with st.expander("Preview markdown report"):
             st.markdown(md_path.read_text(encoding="utf-8", errors="ignore"))
+
+        # Persist extended scan metadata into big DB tables.
+        cache = ScanCache(str(local_repo))
+        changed_count = added_count = deleted_count = 0
+        cache_hit = False
+        if incremental and cache.is_warm():
+            changed, added, deleted = cache.compute_diff()
+            changed_count = len(changed)
+            added_count = len(added)
+            deleted_count = len(deleted)
+            cache_hit = changed_count == 0 and added_count == 0 and deleted_count == 0
+
+        upsert_workspace_repo(
+            user_id=st.session_state.app_user_id,
+            repo_full_name=selected_name,
+            clone_path=str(local_repo),
+            scan_mode="incremental" if incremental else "full",
+            model_name=openai_model,
+            status="success",
+        )
+
+        upsert_scan_cache_state(
+            user_id=st.session_state.app_user_id,
+            repo_full_name=selected_name,
+            last_commit=cache._last_commit or "",
+            changed_count=changed_count,
+            added_count=added_count,
+            deleted_count=deleted_count,
+            cache_hit=cache_hit,
+        )
+
+        md_content = md_path.read_text(encoding="utf-8", errors="ignore")
+        pdf_blob = pdf_path.read_bytes() if pdf_path else None
+        save_scan_report(
+            user_id=st.session_state.app_user_id,
+            repo_full_name=selected_name,
+            scan_mode="incremental" if incremental else "full",
+            model_name=openai_model,
+            status="success",
+            findings_count=len(confirmed),
+            risk_score=float(scan_result.risk_score),
+            report_md_path=str(md_path),
+            report_pdf_path=str(pdf_path) if pdf_path else "",
+            report_md_content=md_content,
+            report_pdf_blob=pdf_blob,
+            scan_logs="\n".join(scan_logs),
+            error_message="",
+            started_at=scan_started_at,
+            finished_at=int(time.time()),
+        )
+
+        st.info("Scan report and logs saved to DB history.")
     except Exception as exc:
         progress_placeholder.error("Scan failed.")
+        upsert_workspace_repo(
+            user_id=st.session_state.app_user_id,
+            repo_full_name=selected_name,
+            clone_path=str(WORKSPACE_DIR / selected_name.replace("/", "__")),
+            scan_mode="incremental" if incremental else "full",
+            model_name=openai_model,
+            status="failed",
+        )
+        save_scan_report(
+            user_id=st.session_state.app_user_id,
+            repo_full_name=selected_name,
+            scan_mode="incremental" if incremental else "full",
+            model_name=openai_model,
+            status="failed",
+            findings_count=0,
+            risk_score=0.0,
+            report_md_path="",
+            report_pdf_path="",
+            report_md_content="",
+            report_pdf_blob=None,
+            scan_logs="\n".join(scan_logs),
+            error_message=str(exc),
+            started_at=int(time.time()),
+            finished_at=int(time.time()),
+        )
         st.exception(exc)
 
 
