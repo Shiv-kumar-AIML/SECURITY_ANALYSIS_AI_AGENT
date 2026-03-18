@@ -294,6 +294,13 @@ def get_app_user_id(username: str) -> int | None:
     return int(row[0]) if row else None
 
 
+def app_has_users() -> bool:
+    """Return True when at least one local app user exists."""
+    with sqlite3.connect(APP_DB_PATH) as conn:
+        row = conn.execute("SELECT COUNT(1) FROM app_users").fetchone()
+    return bool(row and int(row[0] or 0) > 0)
+
+
 def validate_user_session(user_id: int, username: str) -> bool:
     """Ensure session user_id belongs to the same username in DB."""
     with sqlite3.connect(APP_DB_PATH) as conn:
@@ -1067,7 +1074,27 @@ def main() -> None:
         st.session_state.user_login = user.get("login", "")
         st.session_state.repos = repos
 
+    def complete_app_login(username: str, remember_login: bool = True) -> None:
+        """Set authenticated session and restore saved GitHub auth if present."""
+        uname = username.strip().lower()
+        st.session_state.app_authenticated = True
+        st.session_state.app_username = uname
+        st.session_state.app_user_id = get_app_user_id(uname)
+        set_app_setting("last_login_username", uname)
+        set_app_setting("auto_login_username", uname if remember_login else "")
+
+        saved_login, saved_token = load_user_github_auth(uname)
+        if saved_token:
+            try:
+                load_repos_with_token(saved_token)
+                st.session_state.user_login = saved_login or st.session_state.user_login
+            except Exception:
+                clear_user_github_auth(uname)
+                st.session_state.github_token = ""
+                st.session_state.repos = []
+
     def logout_app() -> None:
+        set_app_setting("auto_login_username", "")
         st.session_state.app_authenticated = False
         st.session_state.app_username = ""
         st.session_state.app_user_id = None
@@ -1078,10 +1105,49 @@ def main() -> None:
         st.session_state.device_flow = {}
 
     if not st.session_state.app_authenticated:
-        st.subheader("Step 1: Create account or login")
-        tab_signup, tab_login = st.tabs(["Sign up", "Login"])
+        users_exist = app_has_users()
+        last_login_username = get_app_setting("last_login_username", "")
+        auto_login_username = get_app_setting("auto_login_username", "").strip().lower()
 
-        with tab_signup:
+        if users_exist and auto_login_username:
+            if get_app_user_id(auto_login_username) is not None:
+                complete_app_login(auto_login_username, remember_login=True)
+                st.rerun()
+            else:
+                set_app_setting("auto_login_username", "")
+
+        if users_exist:
+            st.subheader("Step 1: Login")
+            st.caption("Account already created hai. Sign up dubara required nahi hai.")
+            with st.form("login_form", clear_on_submit=False):
+                li_username = st.text_input("Username", key="login_username", value=last_login_username)
+                li_password = st.text_input("Password", type="password", key="login_password")
+                li_remember = st.checkbox("Remember login on this device", value=True, key="login_remember_existing")
+                li_submit = st.form_submit_button("Login", use_container_width=True)
+                if li_submit:
+                    ok, msg = authenticate_app_user(li_username, li_password)
+                    if ok:
+                        complete_app_login(li_username, remember_login=li_remember)
+
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            with st.expander("Need to create another account?"):
+                with st.form("signup_form", clear_on_submit=False):
+                    su_username = st.text_input("Username")
+                    su_password = st.text_input("Password", type="password")
+                    su_submit = st.form_submit_button("Create account", use_container_width=True)
+                    if su_submit:
+                        ok, msg = create_app_user(su_username, su_password)
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+        else:
+            st.subheader("Step 1: Create account")
+            st.caption("First time setup: pehle account create karein, phir login karein.")
             with st.form("signup_form", clear_on_submit=False):
                 su_username = st.text_input("Username")
                 su_password = st.text_input("Password", type="password")
@@ -1093,28 +1159,16 @@ def main() -> None:
                     else:
                         st.error(msg)
 
-        with tab_login:
+            st.markdown("---")
             with st.form("login_form", clear_on_submit=False):
-                li_username = st.text_input("Username", key="login_username")
+                li_username = st.text_input("Username", key="login_username", value=last_login_username)
                 li_password = st.text_input("Password", type="password", key="login_password")
+                li_remember = st.checkbox("Remember login on this device", value=True, key="login_remember_firsttime")
                 li_submit = st.form_submit_button("Login", use_container_width=True)
                 if li_submit:
                     ok, msg = authenticate_app_user(li_username, li_password)
                     if ok:
-                        uname = li_username.strip().lower()
-                        st.session_state.app_authenticated = True
-                        st.session_state.app_username = uname
-                        st.session_state.app_user_id = get_app_user_id(uname)
-
-                        saved_login, saved_token = load_user_github_auth(uname)
-                        if saved_token:
-                            try:
-                                load_repos_with_token(saved_token)
-                                st.session_state.user_login = saved_login or st.session_state.user_login
-                            except Exception:
-                                clear_user_github_auth(uname)
-                                st.session_state.github_token = ""
-                                st.session_state.repos = []
+                        complete_app_login(li_username, remember_login=li_remember)
 
                         st.success(msg)
                         st.rerun()
