@@ -14,8 +14,11 @@ import base64
 import hashlib
 import os
 import secrets
+import shutil
 import sqlite3
 import subprocess
+import tarfile
+import tempfile
 import textwrap
 import time
 import urllib.parse
@@ -614,6 +617,73 @@ def _git_auth_prefix(token: str | None) -> list[str]:
     return ["git", "-c", f"http.extraheader=AUTHORIZATION: basic {basic}"]
 
 
+def _is_git_available() -> bool:
+    """Return True when git executable is available in PATH."""
+    return shutil.which("git") is not None
+
+
+def _download_repo_snapshot(repo: dict, token: str | None, local_path: Path) -> Path:
+    """Download a GitHub tarball snapshot and extract it into local_path."""
+    owner_repo = str(repo.get("full_name", "")).strip()
+    if not owner_repo:
+        raise RuntimeError("Invalid GitHub repo metadata: missing full_name")
+
+    branch = str(repo.get("default_branch") or "HEAD")
+    snapshot_url = f"https://api.github.com/repos/{owner_repo}/tarball/{urllib.parse.quote(branch, safe='')}"
+
+    request = urllib.request.Request(
+        snapshot_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Security-Analysis-AI-Agent",
+            **({"Authorization": f"Bearer {token}"} if token else {}),
+        },
+    )
+
+    with urllib.request.urlopen(request, timeout=60) as response:
+        archive_bytes = response.read()
+
+    if local_path.exists():
+        shutil.rmtree(local_path, ignore_errors=True)
+    local_path.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz") as tmp:
+        tmp.write(archive_bytes)
+        tmp_path = Path(tmp.name)
+
+    try:
+        with tarfile.open(tmp_path, mode="r:gz") as tar:
+            for member in tar.getmembers():
+                # GitHub archives add a root folder; strip that prefix.
+                original = member.name
+                parts = Path(original).parts
+                if len(parts) <= 1:
+                    continue
+
+                relative_target = Path(*parts[1:])
+                destination = (local_path / relative_target).resolve()
+                if not str(destination).startswith(str(local_path.resolve())):
+                    continue
+
+                if member.isdir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with open(destination, "wb") as f:
+                    shutil.copyfileobj(extracted, f)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return local_path
+
+
 def clone_or_update_repo(repo: dict, token: str | None, incremental: bool) -> Path:
     """Clone first time; update existing clone before scan."""
     owner_repo = repo.get("full_name", "repo")
@@ -622,6 +692,10 @@ def clone_or_update_repo(repo: dict, token: str | None, incremental: bool) -> Pa
     clone_url = str(repo.get("clone_url", ""))
 
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not _is_git_available():
+        # Environments like Streamlit Cloud may not provide git binary.
+        return _download_repo_snapshot(repo, token, local_path)
 
     if local_path.exists():
         git_prefix = _git_auth_prefix(token)
