@@ -1142,7 +1142,7 @@ def main() -> None:
                 set_app_setting("auto_login_username", "")
 
         if users_exist:
-            st.subheader("Step 1: Login")
+            st.subheader("Login")
             st.caption("An account already exists. You do not need to sign up again.")
             with st.form("login_form", clear_on_submit=False):
                 li_username = st.text_input("Username", key="login_username", value=last_login_username)
@@ -1171,7 +1171,7 @@ def main() -> None:
                         else:
                             st.error(msg)
         else:
-            st.subheader("Step 1: Create account")
+            st.subheader("Create account")
             st.caption("First-time setup: create an account first, then log in.")
             with st.form("signup_form", clear_on_submit=False):
                 su_username = st.text_input("Username")
@@ -1219,7 +1219,7 @@ def main() -> None:
         return
 
     if not st.session_state.github_token:
-        st.subheader("Step 2: Connect GitHub")
+        st.subheader("Connect GitHub")
         entered_client_id = st.text_input(
             "GitHub OAuth Client ID",
             value=st.session_state.github_oauth_client_id,
@@ -1448,7 +1448,7 @@ def main() -> None:
         st.session_state.selected_repo_full_name = ""
         st.rerun()
 
-    st.subheader(f"Step 3: Scan options - {selected_name}")
+    st.subheader(f"Scan options - {selected_name}")
     model_options = [
         "gpt-4.1-nano",
         "gpt-4.1-mini",
