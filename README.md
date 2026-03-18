@@ -319,6 +319,48 @@ python main.py https://github.com/org/repo.git --branch develop \
   --model gpt-4.1-mini
 ```
 
+**Run Streamlit GUI (GitHub auth + repo picker + PDF report):**
+```bash
+streamlit run streamlit_app.py
+```
+
+or using script entry point:
+```bash
+pentas-gui
+```
+
+**Set default scan mode for GUI from env:**
+```bash
+# default is incremental if not set
+export SCAN_MODE=incremental
+# or
+export SCAN_MODE=full
+```
+
+You can also use:
+```bash
+export FULL_SCAN=true
+```
+
+**Enable real GitHub Login (recommended):**
+```bash
+export GITHUB_OAUTH_CLIENT_ID=your_github_oauth_app_client_id
+```
+
+**OpenAI key is server-side only (not shown in UI):**
+```bash
+export OPENAI_API_KEY=your_openai_api_key
+```
+
+Then UI flow will be:
+1. Platform account `Sign up / Login` (local app user)
+2. `Login with GitHub` once (OAuth device flow)
+3. Home page par sab repositories visible
+4. Repository par click
+5. Scan options select karke scan start
+
+GitHub token app DB me persist hota hai, isliye same app user ke liye har baar OAuth repeat nahi hota (jab tak token valid rahe).
+
 ### 5. Supported LLM Providers
 
 | Provider | Flag | Models |
