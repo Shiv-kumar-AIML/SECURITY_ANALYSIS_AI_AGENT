@@ -26,8 +26,8 @@ class SmartContextBuilder:
 
     # Minimum context size before fallback triggers
     MIN_CONTEXT_CHARS = 5000
-    # Maximum context to send to LLM
-    MAX_CONTEXT_CHARS = 60000
+    # Maximum context to send to LLM (increased for unified skills with larger context windows)
+    MAX_CONTEXT_CHARS = 120000
 
     def __init__(self, symbol_table: SymbolTable, call_graph: CallGraph, target_path: str = None):
         self.symbol_table = symbol_table

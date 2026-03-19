@@ -66,13 +66,13 @@ class CoordinatorAgent(BaseAgent):
         # PHASE 2: DEEP VULNERABILITY ANALYSIS
         # ═══════════════════════════════════════════
         if console:
-            console.rule("[bold bright_yellow]Phase 2: Deep Vulnerability Analysis (Reasoning)[/bold bright_yellow]")
+            console.rule("[bold bright_yellow]Phase 2: Unified Vulnerability Analysis[/bold bright_yellow]")
 
         vuln_results = self.vuln_analyst.execute(self.scan_result, code_context, console=console)
 
         if console:
             console.print(f"\n  [green]✓[/green] Agent Findings: [bold]{len(vuln_results.get('findings', []))}[/bold]")
-            console.print(f"  [green]✓[/green] Deep Analysis: [bold]Complete[/bold]\n")
+            console.print(f"  [green]✓[/green] Unified Analysis: [bold]Complete[/bold]\n")
 
         # ═══════════════════════════════════════════
         # PHASE 3: REMEDIATION

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from core.parser import CodeParser
-from core.tree_sitter_parser import TreeSitterParser
+from core.analysis.ast_parser import TreeSitterParser
 
 def test_ast_size():
     # Setup paths

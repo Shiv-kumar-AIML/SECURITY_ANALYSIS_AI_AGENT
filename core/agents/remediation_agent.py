@@ -57,7 +57,7 @@ REMEDIATION:
         self.think(f"Generating remediation for {len(findings)} vulnerabilities...")
 
         vuln_summary = ""
-        for i, f in enumerate(findings[:15], 1):
+        for i, f in enumerate(findings[:30], 1):  # Process up to 30 findings for remediation
             vuln_summary += (
                 f"\n### Vulnerability #{i}\n"
                 f"- **Title**: {f.title}\n"

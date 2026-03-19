@@ -465,6 +465,9 @@ def main():
                     console.print(f"  [green]✓[/green] Functions analyzed: [bold]{meta['functions_total']}[/bold]")
                     console.print(f"  [green]✓[/green] Security-relevant selected: [bold]{meta['functions_selected']}[/bold]")
                     console.print(f"  [green]✓[/green] Sink chains found: [bold]{meta['sink_chains_found']}[/bold] ({meta['dangerous_chains']} dangerous)")
+                    # Show taint analysis results if available
+                    if meta.get('taint_chains_vulnerable', 0) > 0:
+                        console.print(f"  [green]✓[/green] Taint chains: [bold bright_red]{meta['taint_chains_vulnerable']}[/bold bright_red] vulnerable / {meta['taint_chains_total']} total ({meta.get('taint_chains_critical', 0)} critical)")
                     console.print(f"  [green]✓[/green] Context: [bold]{stats['filtered_chars']:,}[/bold] / {stats['original_chars']:,} chars [bold bright_green]({stats['reduction_percent']}% reduction)[/bold bright_green]")
             else:
                 if meta.get("used_fallback"):

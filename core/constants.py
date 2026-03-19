@@ -16,29 +16,29 @@ DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:latest")
 DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
-# Skills Layer Definitions
-LAYER_1_SKILLS = [
-    "core-ast-engine.md",
-    "control-flow-engine.md",
-    "dataflow-taint-engine.md",
-    "async-flow-modeling.md",
-    "module-callgraph-engine.md"
+# Unified Analysis Skills — replaces separate Layer 1 + Layer 2 skills
+# Reduces ~17 LLM calls to 4 by merging structural analysis with vulnerability detection.
+# Each unified skill combines AST/flow mapping with its relevant vulnerability domain.
+UNIFIED_ANALYSIS_SKILLS = [
+    "unified-injection-analysis-engine.md",      # AST + dataflow + SQL/NoSQL/command/path-traversal injection
+    "unified-auth-access-engine.md",             # Control flow + auth bypass + authorization + JWT
+    "unified-credential-config-engine.md",       # Callgraph + credentials + web misconfig + prototype pollution
+    "unified-hardening-dependency-engine.md",    # Async flow + security hardening + SCA dependencies
 ]
 
-LAYER_2_SKILLS = [
-    "sast-sql-injection-engine.md",
-    "sast-nosql-injection-engine.md",
-    "sast-command-injection-engine.md",
-    "sast-path-traversal-engine.md",
-    "sast-jwt-oidc-engine.md",
-    "sast-authorization-logic-engine.md",
-    "sast-prototype-pollution-engine.md",
-    "sast-universal-credential-engine.md",
-    "sast-web-misconfig-engine.md",
-    "sca-dependency-engine.md",
-    "sast-auth-bypass-engine.md",
-    "sast-security-hardening-engine.md",
-]
+# Original Layer 1 + Layer 2 skills (kept for reference / individual use):
+# LAYER_1_SKILLS = [
+#     "core-ast-engine.md", "control-flow-engine.md", "dataflow-taint-engine.md",
+#     "async-flow-modeling.md", "module-callgraph-engine.md"
+# ]
+# LAYER_2_SKILLS = [
+#     "sast-sql-injection-engine.md", "sast-nosql-injection-engine.md",
+#     "sast-command-injection-engine.md", "sast-path-traversal-engine.md",
+#     "sast-jwt-oidc-engine.md", "sast-authorization-logic-engine.md",
+#     "sast-prototype-pollution-engine.md", "sast-universal-credential-engine.md",
+#     "sast-web-misconfig-engine.md", "sca-dependency-engine.md",
+#     "sast-auth-bypass-engine.md", "sast-security-hardening-engine.md",
+# ]
 
 # Framework-specific skills — only run when the matching framework is detected.
 # Maps framework name (from recon agent) → skill filename.

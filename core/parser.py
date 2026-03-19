@@ -119,7 +119,7 @@ class CodeParser:
         Extract optimized code context using the vectorless pre-analysis pipeline.
         Falls back to extract_context() if tree-sitter is unavailable or fails.
 
-        Pipeline: AST Parse → Symbol Table → Call Graph → Smart Context Builder
+        Pipeline: AST Parse → Symbol Table → Call Graph → Taint Analysis → Smart Context Builder
 
         Returns:
             dict with 'context' (str), 'metadata' (dict), 'stats' (dict)
@@ -129,6 +129,7 @@ class CodeParser:
             from .analysis.symbol_table import SymbolTable
             from .analysis.call_graph import CallGraph
             from .analysis.context_builder import SmartContextBuilder
+            from .analysis.taint_analyzer import TaintAnalyzer
 
             parser = TreeSitterParser()
 
@@ -149,7 +150,12 @@ class CodeParser:
             # Step 3: Build call graph
             call_graph = CallGraph(symbol_table)
 
-            # Step 4: Build smart context
+            # Step 4: Run taint analysis (deterministic source→sink tracing)
+            taint_analyzer = TaintAnalyzer(symbol_table, call_graph)
+            taint_chains = taint_analyzer.analyze()
+            vulnerable_chains = taint_analyzer.get_vulnerable_chains()
+
+            # Step 5: Build smart context (now enriched with taint data)
             full_context = self.extract_context(max_chars)
             context_builder = SmartContextBuilder(symbol_table, call_graph, target_path=str(self.target_dir))
             result = context_builder.build_context(
@@ -157,10 +163,39 @@ class CodeParser:
                 scanner_files=scanner_files or [],
             )
 
+            # Step 6: Inject taint analysis summary into context header
+            # This gives the LLM pre-identified vulnerability paths to focus on
+            if vulnerable_chains:
+                taint_header = "\n\n═══ TAINT ANALYSIS (Deterministic Source→Sink Tracing) ═══\n"
+                taint_header += f"Found {len(vulnerable_chains)} VULNERABLE chains "
+                taint_header += f"(out of {len(taint_chains)} total, {len(taint_chains) - len(vulnerable_chains)} sanitized/safe)\n\n"
+
+                for i, chain in enumerate(vulnerable_chains[:15], 1):
+                    path_str = " → ".join(f.name for f in chain.flow_path)
+                    taint_header += (
+                        f"  ⚠ Chain #{i} [{chain.risk_level.upper()}]: "
+                        f"{chain.source} → {path_str} → {chain.sink}\n"
+                        f"    File: {chain.sink_func.file}:{chain.sink_func.line}\n"
+                    )
+
+                taint_header += "\nFocus your analysis on CONFIRMING these chains. Also look for chains the deterministic analysis may have missed.\n"
+                taint_header += "═" * 55 + "\n"
+
+                # Prepend taint header to context
+                result["context"] = taint_header + result["context"]
+                result["stats"]["filtered_chars"] += len(taint_header)
+
+            # Add taint stats to metadata
+            taint_stats = taint_analyzer.get_stats()
+            result["metadata"]["taint_chains_total"] = taint_stats["total_chains"]
+            result["metadata"]["taint_chains_vulnerable"] = taint_stats["vulnerable_chains"]
+            result["metadata"]["taint_chains_critical"] = taint_stats["critical_chains"]
+
             # Store for later use by coordinator
             self.pre_analysis = {
                 "symbol_table": symbol_table,
                 "call_graph": call_graph,
+                "taint_analyzer": taint_analyzer,
                 "context_builder": context_builder,
                 "ast_data": ast_data,
             }

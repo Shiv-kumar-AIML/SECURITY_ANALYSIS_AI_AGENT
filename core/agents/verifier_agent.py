@@ -179,7 +179,23 @@ def _is_safe_framework_pattern(finding: Finding) -> bool:
     for phrase in no_vuln_title_phrases:
         if phrase in title:
             return True
-    
+
+    # UNIVERSAL: Detect when "vulnerable code" is actually a STRING DEFINITION,
+    # regex pattern, or documentation example — not a real vulnerability.
+    # Works for ANY project, no hardcoded filenames.
+    if code:
+        import re
+        # Check if the dangerous function is inside quotes (= string reference, not actual call)
+        # e.g., '"cursor.execute"' in a list vs cursor.execute(query) as real code
+        quoted_danger_patterns = re.findall(
+            r'["\'][a-z_]+\.(execute|system|popen|run|call|eval|exec)["\']', code
+        )
+        if quoted_danger_patterns:
+            # Also verify there are list/dict indicators (string collections)
+            collection_indicators = ['["', "['", '",', "',", '": ', "': ", "re.compile"]
+            if any(ind in code for ind in collection_indicators):
+                return True
+
     return False
 
 
@@ -468,17 +484,21 @@ VERIFICATION:
 
             # Batch 1: Critical & High findings (most important to verify)
             if critical_high:
-                batch = critical_high[:25]
-                verification_text = self._verify_findings_batch(batch, code_context, "Critical+High")
-                self.share_knowledge("verification_critical_high", verification_text)
-                self._apply_verification(batch, verification_text)
+                for batch_start in range(0, len(critical_high), 50):
+                    batch = critical_high[batch_start:batch_start + 50]
+                    batch_label = f"Critical+High batch {batch_start // 50 + 1}"
+                    verification_text = self._verify_findings_batch(batch, code_context, batch_label)
+                    self.share_knowledge(f"verification_critical_high_{batch_start}", verification_text)
+                    self._apply_verification(batch, verification_text)
 
             # Batch 2: Medium & Low findings
             if medium_low:
-                batch = medium_low[:25]
-                verification_text = self._verify_findings_batch(batch, code_context, "Medium+Low")
-                self.share_knowledge("verification_medium_low", verification_text)
-                self._apply_verification(batch, verification_text)
+                for batch_start in range(0, len(medium_low), 50):
+                    batch = medium_low[batch_start:batch_start + 50]
+                    batch_label = f"Medium+Low batch {batch_start // 50 + 1}"
+                    verification_text = self._verify_findings_batch(batch, code_context, batch_label)
+                    self.share_knowledge(f"verification_medium_low_{batch_start}", verification_text)
+                    self._apply_verification(batch, verification_text)
 
         # Set default confidence for unverified findings
         for f in all_findings:

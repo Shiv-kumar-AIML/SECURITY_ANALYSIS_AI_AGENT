@@ -225,7 +225,24 @@ class HardcodedPatternScanner(BaseTool):
                             if has_context:
                                 # Get the matching line content
                                 match_line = lines[line_num - 1] if line_num <= len(lines) else ""
+                                match_line_stripped = match_line.strip()
+
+                                # NARROW CHECK: Only skip if the match is inside a REGEX
+                                # PATTERN DEFINITION (the scanner's own detection patterns).
+                                # Do NOT skip comments or strings — real credentials in
+                                # comments/strings ARE vulnerabilities that must be flagged!
+                                is_regex_definition = False
                                 
+                                # Only skip regex definitions like: r"""...""", r'...', re.compile(...)
+                                if any(rx in match_line_stripped for rx in [
+                                    'r"', "r'", 'r"""', "r'''", "re.compile(",
+                                    '"regex":', "'regex':", '"regex" :', "'regex' :",
+                                ]):
+                                    is_regex_definition = True
+                                
+                                if is_regex_definition:
+                                    continue  # Skip — this is a regex pattern definition
+
                                 results.append({
                                     "pattern_id": pattern["id"],
                                     "title": pattern["title"],
@@ -237,7 +254,7 @@ class HardcodedPatternScanner(BaseTool):
                                     "line": line_num,
                                     "match": match.group(0),
                                     "context": context,
-                                    "match_line": match_line.strip(),
+                                    "match_line": match_line_stripped,
                                 })
                     except Exception:
                         continue

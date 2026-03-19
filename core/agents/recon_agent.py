@@ -10,7 +10,7 @@ from .base_agent import BaseAgent
 from ..findings import Finding, ScanResult, Severity, FindingSource
 from ..tools.tool_registry import ToolRegistry
 from ..constants import (
-    SKILLS_DIR, LAYER_1_SKILLS, MANIFEST_FILES,
+    SKILLS_DIR, MANIFEST_FILES,
     SKIP_DIRECTORIES, SUPPORTED_EXTENSIONS
 )
 
@@ -108,35 +108,9 @@ class ReconAgent(BaseAgent):
         self.conclude(f"Tool scanning complete: {len(findings)} findings from {len(available)} tools")
         return findings
 
-    def _run_layer1_skills(self, code_context: str, console=None) -> Dict[str, str]:
-        """Run Layer 1 (core engine) skills for structural understanding."""
-        self.think("Running Layer 1 core engine skills for deep code understanding...")
-        results = {}
-
-        for skill in LAYER_1_SKILLS:
-            if console:
-                console.print(f"  [cyan]▸[/cyan] Skill: [bold]{skill.replace('.md', '').replace('-', ' ').title()}[/bold]")
-
-            # Build context from our own shared knowledge (tech stack, tool findings)
-            own_context_parts = []
-            tech_stack = self.read_peer_knowledge("recon_agent", "tech_stack")
-            if tech_stack:
-                own_context_parts.append(f"### Tech Stack Analysis\n{tech_stack}")
-            
-            tool_summary = self.read_peer_knowledge("recon_agent", "tool_findings_summary")
-            if tool_summary:
-                own_context_parts.append(f"### Tool Scanner Findings\n{tool_summary}")
-            
-            own_context = "\n\n".join(own_context_parts) if own_context_parts else ""
-            
-            response = self.run_skill(skill, code_context, extra_context=own_context)
-            results[skill] = response
-
-            # Share each skill's findings immediately
-            skill_key = skill.replace(".md", "").replace("-", "_")
-            self.share_knowledge(skill_key, response)
-
-        return results
+    # NOTE: Layer 1 skills (AST, control flow, dataflow, async, callgraph) have been
+    # merged into the unified analysis skills run by VulnerabilityAgent.
+    # This eliminates 5 separate LLM calls without accuracy loss.
 
     def _build_threat_model(self, tech_stack: Dict, code_context: str) -> str:
         """Use LLM reasoning to build an initial threat model."""
@@ -166,13 +140,12 @@ class ReconAgent(BaseAgent):
 
     def execute(self, scan_result: ScanResult, code_context: str, console=None) -> dict:
         """
-        Full reconnaissance execution:
+        Reconnaissance execution (optimized — Layer 1 skills merged into unified analysis):
         1. Detect tech stack
         2. Run external tools
-        3. Run Layer 1 skills
-        4. Build threat model
+        3. Build threat model
         """
-        self.think("Starting full reconnaissance phase...")
+        self.think("Starting reconnaissance phase...")
 
         # 1. Tech Stack Detection
         tech_stack = self._detect_tech_stack(scan_result.target_path)
@@ -201,10 +174,7 @@ class ReconAgent(BaseAgent):
         tool_summary = "\n".join([f"- [{f.severity.value}] {f.title} in {f.file_path}:{f.line_number}" for f in tool_findings[:20]])
         self.share_knowledge("tool_findings_summary", tool_summary or "No tool findings.")
 
-        # 3. Run Layer 1 Skills (Code Understanding)
-        layer1_results = self._run_layer1_skills(code_context, console=console)
-
-        # 4. Build Threat Model
+        # 3. Build Threat Model (single LLM call)
         threat_model = self._build_threat_model(tech_stack, code_context)
 
         # Send high-level context to downstream agents
@@ -216,6 +186,5 @@ class ReconAgent(BaseAgent):
         return {
             "tech_stack": tech_stack,
             "tool_findings": tool_findings,
-            "layer1_results": layer1_results,
             "threat_model": threat_model,
         }

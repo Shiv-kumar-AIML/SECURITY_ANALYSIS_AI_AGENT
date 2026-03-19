@@ -110,7 +110,7 @@ class LLMProvider:
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": temperature,
-                "max_tokens": 16384,
+                "max_tokens": 32768,  # Increased for unified skills which produce longer analysis
             }
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
@@ -158,7 +158,7 @@ class LLMProvider:
             "stream": False,
             "options": {
                 "temperature": temperature,
-                "num_ctx": 32768
+                "num_ctx": 65536  # Increased for unified skills which use larger system prompts
             }
         }
         if json_mode:

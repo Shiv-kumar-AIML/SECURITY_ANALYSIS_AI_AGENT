@@ -341,10 +341,10 @@ Remember: Be CONSERVATIVE with REMOVE. Only remove clear false positives and exa
 
         self.think(f"Validating {len(confirmed)} confirmed findings for tech stack: {tech_stack}")
 
-        # Process in batches of 25 findings (optimized for token cost)
-        # 8 per batch = 61 LLM calls for 481 findings (too many!)
-        # 25 per batch = 20 LLM calls for 481 findings (3x cheaper)
-        batch_size = 25
+        # Process in batches of 50 findings (optimized for larger context windows)
+        # 25 per batch = 20 LLM calls for 481 findings
+        # 50 per batch = 10 LLM calls for 481 findings (2x cheaper)
+        batch_size = 50
         all_validated = []
         total_removed = 0
         total_fixed = 0
@@ -376,12 +376,24 @@ Remember: Be CONSERVATIVE with REMOVE. Only remove clear false positives and exa
                 all_validated.extend(batch)
 
         # Update scan result — replace findings with validated ones
-        # Mark removed findings as false positives
-        validated_titles = {f.title for f in all_validated}
+        # Mark removed findings as false positives using composite dedup key
+        validated_keys = set()
+        for f in all_validated:
+            # Composite key: file + line_bucket + normalized_title
+            title_norm = f.title.lower().strip()[:80]
+            file_norm = f.file_path.strip().lower()
+            line_bucket = f.line_number // 5
+            validated_keys.add(f"{file_norm}:{line_bucket}:{title_norm}")
+
         for f in scan_result.findings:
-            if not f.is_false_positive and f.title not in validated_titles:
-                f.is_false_positive = True
-                f.false_positive_reason = "Removed by report validator (duplicate or false positive)"
+            if not f.is_false_positive:
+                title_norm = f.title.lower().strip()[:80]
+                file_norm = f.file_path.strip().lower()
+                line_bucket = f.line_number // 5
+                key = f"{file_norm}:{line_bucket}:{title_norm}"
+                if key not in validated_keys:
+                    f.is_false_positive = True
+                    f.false_positive_reason = "Removed by report validator (duplicate or false positive)"
 
         self.conclude(
             f"Validation complete: {len(all_validated)} kept, "

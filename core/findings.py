@@ -58,9 +58,7 @@ class FindingSource(Enum):
     AGENT_VULNERABILITY = "vulnerability_agent"
     AGENT_REMEDIATION = "remediation_agent"
     AGENT_VERIFIER = "verifier_agent"
-    SKILL_LAYER_1 = "skill_layer_1"
-    SKILL_LAYER_2 = "skill_layer_2"
-    SKILL_LAYER_3 = "skill_layer_3"
+    AGENT_UNIFIED_ANALYSIS = "unified_analysis"  # Unified skills (replaces old Layer 1/2/3)
 
 
 @dataclass
@@ -99,7 +97,7 @@ class Finding:
     @classmethod
     def from_dict(cls, data: dict) -> "Finding":
         data["severity"] = Severity(data.get("severity", "INFO"))
-        data["source"] = FindingSource(data.get("source", "skill_layer_2"))
+        data["source"] = FindingSource(data.get("source", "unified_analysis"))
         data.pop("finding_id", None)
         data.pop("timestamp", None)
         return cls(**data)
@@ -122,8 +120,46 @@ class ScanResult:
     tech_stack: List[str] = field(default_factory=list)
     files_scanned: int = 0
     total_lines: int = 0
+    # Dedup tracking — prevents same finding from being added multiple times
+    _dedup_keys: set = field(default_factory=set, repr=False)
+    # Per-title counter for LOW tool findings — cap at 3 to prevent report clutter
+    _title_counts: dict = field(default_factory=dict, repr=False)
+    MAX_LOW_TOOL_PER_TITLE = 3  # Keep max 3 "Try Except Pass", "Blacklist", etc.
+
+    @staticmethod
+    def _make_dedup_key(finding: Finding) -> str:
+        """Create a composite dedup key from (file, line_range, normalized_title).
+        Findings with the same file, nearby lines (<5 apart), and similar titles
+        are considered duplicates."""
+        title_norm = finding.title.lower().strip()
+        # Normalize common variations
+        for prefix in ["use of ", "insecure ", "potential ", "possible "]:
+            if title_norm.startswith(prefix):
+                title_norm = title_norm[len(prefix):]
+        file_norm = finding.file_path.strip().lower()
+        # Group nearby lines (within 5 lines = same finding)
+        line_bucket = finding.line_number // 5
+        return f"{file_norm}:{line_bucket}:{title_norm[:80]}"
 
     def add_finding(self, finding: Finding):
+        """Add a finding with automatic deduplication and LOW-severity consolidation.
+        - Duplicates (same file+line+title) are silently dropped.
+        - LOW/INFO tool findings are capped at 3 per title to prevent clutter."""
+        dedup_key = self._make_dedup_key(finding)
+        if dedup_key in self._dedup_keys:
+            return  # Exact duplicate — skip
+        self._dedup_keys.add(dedup_key)
+
+        # Cap LOW/INFO severity tool findings at MAX_LOW_TOOL_PER_TITLE per title
+        # (e.g., "Try Except Pass" 10x → keep only 3)
+        if (finding.source.value.startswith("tool_") and
+                finding.severity in (Severity.LOW, Severity.INFO)):
+            title_key = finding.title.lower().strip()
+            count = self._title_counts.get(title_key, 0)
+            if count >= self.MAX_LOW_TOOL_PER_TITLE:
+                return  # Already have enough of this type
+            self._title_counts[title_key] = count + 1
+
         self.findings.append(finding)
         if finding.source.value.startswith("tool_"):
             self.tool_findings.append(finding)
