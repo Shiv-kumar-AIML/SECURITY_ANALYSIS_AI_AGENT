@@ -11,6 +11,7 @@ __pycache__
 venv/
 .venv/
 env/
+.env/
 
 # IDE
 .vscode/
@@ -18,11 +19,11 @@ env/
 *.swp
 *.swo
 
+issue_remains.txt
+
 # Project
 reports/
-workspace/*
-!workspace/test_repo/
-!workspace/test_repo/**
+workspace/
 .env
 *.log
 
@@ -32,3 +33,6 @@ Thumbs.db
 
 
 .scan_cache
+
+
+backend/pentas-security-scanner.2026-03-20.private-key.pem

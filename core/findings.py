@@ -132,14 +132,43 @@ class ScanResult:
         Findings with the same file, nearby lines (<5 apart), and similar titles
         are considered duplicates."""
         title_norm = finding.title.lower().strip()
+
         # Normalize common variations
-        for prefix in ["use of ", "insecure ", "potential ", "possible "]:
+        for prefix in ["use of ", "insecure ", "potential ", "possible ", "detected "]:
             if title_norm.startswith(prefix):
                 title_norm = title_norm[len(prefix):]
+
+        # Extract core vulnerability type for better dedup
+        # This catches "SQL Injection in func()" vs "SQL Injection via string concat"
+        vuln_keywords = [
+            "sql injection", "command injection", "code injection",
+            "xss", "cross-site scripting", "path traversal", "directory traversal",
+            "ssrf", "server-side request forgery", "nosql injection",
+            "deserialization", "prototype pollution", "open redirect",
+            "hardcoded password", "hardcoded secret", "hardcoded credential",
+            "hardcoded otp", "hardcoded token", "hardcoded api key",
+            "missing authentication", "broken authentication", "auth bypass",
+            "insecure randomness", "weak random", "math.random",
+            "stack trace", "error leak", "sensitive data exposure",
+        ]
+
+        # Check if title contains a known vulnerability keyword
+        core_vuln = None
+        for kw in vuln_keywords:
+            if kw in title_norm:
+                core_vuln = kw
+                break
+
+        # Use core vulnerability type if found, otherwise use truncated title
+        if core_vuln:
+            title_key = core_vuln
+        else:
+            title_key = title_norm[:50]  # Reduced from 80 for tighter dedup
+
         file_norm = finding.file_path.strip().lower()
         # Group nearby lines (within 5 lines = same finding)
         line_bucket = finding.line_number // 5
-        return f"{file_norm}:{line_bucket}:{title_norm[:80]}"
+        return f"{file_norm}:{line_bucket}:{title_key}"
 
     def add_finding(self, finding: Finding):
         """Add a finding with automatic deduplication and LOW-severity consolidation.

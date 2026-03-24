@@ -99,8 +99,29 @@ class LLMProvider:
 
     def _generate_openai(self, prompt: str, system: str, temperature: float, json_mode: bool) -> str:
         """OpenAI-compatible API backend."""
+        from openai import OpenAI
+
+        # Determine max_tokens based on model capabilities (use maximum available)
+        # gpt-4o/gpt-4o-mini: max 16384 output tokens
+        # gpt-4-turbo: max 4096 output tokens
+        # gpt-3.5-turbo: max 4096 output tokens
+        # o1/o1-mini: max 100000 output tokens (reasoning models)
+        model_lower = self.model.lower()
+        if "o1" in model_lower:
+            max_tokens = 65536  # o1 models support much higher
+        elif "gpt-4o" in model_lower:
+            max_tokens = 16384
+        elif "gpt-4-turbo" in model_lower:
+            max_tokens = 4096
+        elif "gpt-4" in model_lower:
+            max_tokens = 8192
+        elif "gpt-3.5" in model_lower:
+            max_tokens = 4096
+        else:
+            # Default for unknown models - use a reasonable value
+            max_tokens = 8192
+
         try:
-            from openai import OpenAI
             client = OpenAI(api_key=self.openai_key, base_url=self.openai_base_url)
 
             kwargs = {
@@ -110,7 +131,7 @@ class LLMProvider:
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": temperature,
-                "max_tokens": 32768,  # Increased for unified skills which produce longer analysis
+                "max_tokens": max_tokens,
             }
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
@@ -125,7 +146,14 @@ class LLMProvider:
             return response.choices[0].message.content or ""
 
         except Exception as e:
-            raise RuntimeError(f"OpenAI API error: {e}")
+            error_str = str(e)
+            # Extract meaningful error from OpenAI response
+            if hasattr(e, 'body') and e.body:
+                if isinstance(e.body, dict):
+                    error_str = e.body.get('message', str(e.body))
+                else:
+                    error_str = str(e.body)
+            raise RuntimeError(f"OpenAI API error (model={self.model}): {error_str}")
 
     def _generate_gemini(self, prompt: str, system: str, temperature: float) -> str:
         """Google Gemini API backend."""

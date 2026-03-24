@@ -66,10 +66,15 @@ def sanitize_url(url: str) -> str:
     
     return parsed.geturl()
 
-def clone_repo(url: str, dest: Optional[str] = None) -> str:
+def clone_repo(url: str, dest: Optional[str] = None, force_fresh: bool = False) -> str:
     """
     Clone a git repository to a local directory with production-level safety.
     Hides credentials, shallow clones for speed, and retries on failure.
+
+    Args:
+        url: Git repository URL
+        dest: Destination directory (optional, uses cache if None)
+        force_fresh: If True, delete existing cache and clone fresh
     """
     try:
         import git
@@ -77,19 +82,52 @@ def clone_repo(url: str, dest: Optional[str] = None) -> str:
         raise RuntimeError("gitpython is required. Install with: pip install gitpython")
 
     safe_url = sanitize_url(url)
-    
+
     if dest is None:
         # Use project-local hidden cache dir
         local_cache = Path(__file__).resolve().parent.parent / ".scan_cache" / "clones"
         local_cache.mkdir(parents=True, exist_ok=True)
-        
+
         parsed = urlparse(safe_url)
         repo_name = os.path.basename(parsed.path).replace(".git", "") or "repo"
         dest_path = local_cache / repo_name
-        
+
         if dest_path.exists() and any(dest_path.iterdir()):
-            print(f"[*] Using existing cached codebase: {repo_name} ...")
-            return str(dest_path.resolve())
+            if force_fresh:
+                # Force fresh clone - delete cached repo
+                print(f"[*] Force fresh: removing cached repo {repo_name} ...")
+                shutil.rmtree(dest_path, ignore_errors=True)
+            else:
+                # Update existing cached repo with git pull
+                print(f"[*] Updating cached repository: {repo_name} ...")
+                try:
+                    import subprocess
+                    # Fetch and reset to origin/HEAD to handle force pushes
+                    subprocess.run(
+                        ["git", "-C", str(dest_path), "fetch", "--depth=1", "origin"],
+                        capture_output=True, timeout=60, env=_git_env()
+                    )
+                    # Get default branch name
+                    result = subprocess.run(
+                        ["git", "-C", str(dest_path), "remote", "show", "origin"],
+                        capture_output=True, text=True, timeout=30, env=_git_env()
+                    )
+                    default_branch = "main"
+                    for line in result.stdout.splitlines():
+                        if "HEAD branch:" in line:
+                            default_branch = line.split(":")[-1].strip()
+                            break
+
+                    # Reset to origin's default branch
+                    subprocess.run(
+                        ["git", "-C", str(dest_path), "reset", "--hard", f"origin/{default_branch}"],
+                        capture_output=True, timeout=30, env=_git_env()
+                    )
+                    print(f"[+] Repository updated to latest {default_branch}.")
+                    return str(dest_path.resolve())
+                except Exception as e:
+                    print(f"[!] Failed to update cached repo: {e}. Re-cloning fresh...")
+                    shutil.rmtree(dest_path, ignore_errors=True)
     else:
         dest_path = Path(dest)
 

@@ -35,6 +35,14 @@ dependencies = [
     "rich>=13.7.0",
     # GUI
     "streamlit>=1.28.0",
+    # Web Server (GitHub Webhook Integration)
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.25.0",
+    "PyJWT>=2.8.0",
+    "cryptography>=41.0.0",
     # Utilities
     "pyyaml>=6.0",
     "jinja2>=3.1.0",
@@ -72,7 +80,7 @@ Repository = "https://github.com/Shiv-kumar-AIML/SECURITY_ANALYSIS_AI_AGENT"
 Issues = "https://github.com/Shiv-kumar-AIML/SECURITY_ANALYSIS_AI_AGENT/issues"
 
 [tool.setuptools]
-packages = ["core", "core.agents", "core.tools"]
+packages = ["core", "core.agents", "core.tools", "core.analysis", "backend"]
 
 [tool.setuptools.package-data]
 "*" = ["*.md", "*.yaml", "*.yml", "*.json"]
